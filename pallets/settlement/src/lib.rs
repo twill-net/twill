@@ -719,6 +719,7 @@ pub mod pallet {
                             _ => ReserveAssetKind::Other,
                         },
                         AssetDomain::Carbon => ReserveAssetKind::CarbonCredit,
+                        AssetDomain::Fiat => ReserveAssetKind::Other,
                     };
                     let amount_u128: u128 = leg.amount.try_into().unwrap_or(0u128);
                     T::ReserveProvider::record_deposit(

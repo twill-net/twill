@@ -111,6 +111,10 @@ pub const EXCHANGE_SPREAD_BPS: u16 = 10;
 pub enum AssetDomain {
     Crypto,
     Carbon,
+    /// Fiat rails — activated by community governance runtime upgrade.
+    /// Settlement records are on-chain; payment confirmation comes from oracle nodes
+    /// monitoring the respective payment network (SEPA, ACH, SWIFT, UPI, Faster Payments).
+    Fiat,
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +134,15 @@ pub enum RailKind {
     GoldStandard,
     // Native
     TwillInternal,
+    // Fiat — activated by community governance runtime upgrade.
+    // Each variant represents a specific fiat payment network.
+    // Off-chain settlement is confirmed by oracle nodes monitoring
+    // the respective payment network before releasing the TWL leg.
+    Sepa,   // EU SEPA credit transfer
+    Ach,    // US ACH (Automated Clearing House)
+    Swift,  // International wire (SWIFT)
+    Upi,    // India Unified Payments Interface
+    Faster, // UK Faster Payments
 }
 
 impl RailKind {
@@ -138,6 +151,7 @@ impl RailKind {
             Self::Bitcoin | Self::Ethereum | Self::Solana => AssetDomain::Crypto,
             Self::Verra | Self::GoldStandard => AssetDomain::Carbon,
             Self::TwillInternal => AssetDomain::Crypto,
+            Self::Sepa | Self::Ach | Self::Swift | Self::Upi | Self::Faster => AssetDomain::Fiat,
         }
     }
 
