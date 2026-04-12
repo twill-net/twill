@@ -474,7 +474,11 @@ Twill addresses this with a two-layer governance model: a community board for op
 
 ### 9.2 Community Board
 
-The board consists of 5 to 7 members elected by TWL holders. Terms are 5 years (~26,280,000 blocks). Elections are permissionless — any TWL holder can self-nominate with a 100 TWL deposit. Voting is stake-weighted: 1 TWL = 1 vote. The top nominees by vote weight win seats.
+The board consists of 5 to 7 members elected by TWL holders. Terms are 5 years (~26,280,000 blocks). Elections are permissionless.
+
+**First election (genesis):** No deposit required, 1 address = 1 vote. The first board must be seated before significant TWL is in circulation, so no economic barrier applies.
+
+**Subsequent elections:** Self-nomination requires a 100 TWL deposit. Voting is stake-weighted: 1 TWL = 1 vote. The top nominees by vote weight win seats.
 
 The board's role is limited to operational stewardship:
 
@@ -492,7 +496,7 @@ All TWL holders can vote on proposals. Voting is stake-weighted (1 TWL = 1 vote)
 - **Approval:** Aye votes exceed Nay votes (simple majority).
 - **Emergency threshold:** Actions affecting the reserve or board recall require 75% Aye.
 
-Proposals require a 100 TWL deposit. Approved proposals are enacted after a 7-day delay (~50,400 blocks). Rejected proposals have their deposit burned. Proposals that fail to reach quorum have their deposit returned.
+There is no deposit required to submit a proposal. The quorum requirement (10% of circulating supply) is the spam filter — proposals without genuine community support simply expire without action. Approved proposals are enacted after a 7-day delay (~50,400 blocks).
 
 ### 9.4 Safeguards
 

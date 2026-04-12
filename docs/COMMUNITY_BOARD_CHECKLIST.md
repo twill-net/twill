@@ -99,10 +99,13 @@ For reference — what community proposals can and cannot do:
 
 | Action | Who | Threshold |
 |--------|-----|-----------|
-| Text proposal (signaling) | Any TWL holder + 100 TWL deposit | 50% Aye, 10% quorum |
-| Runtime upgrade (code change) | Any TWL holder + 100 TWL deposit | 50% Aye, 10% quorum |
-| Board recall | Any TWL holder + 100 TWL deposit | 50% Aye, 10% quorum |
-| Board election | Auto-triggered every 5 years | Top 7 nominees by vote weight |
+| Text proposal (signaling) | Any TWL holder (no deposit) | 50% Aye, 10% quorum |
+| Runtime upgrade (code change) | Any TWL holder (no deposit) | 50% Aye, 10% quorum |
+| Board recall | Any TWL holder (no deposit) | 75% Aye, 10% quorum |
+| Board election (first) | Auto-triggered at genesis | 1 address = 1 vote, no nomination deposit |
+| Board election (subsequent) | Auto-triggered every 5 years | Top 7 nominees by vote weight, 100 TWL nomination deposit |
+
+**No proposal deposit.** The 10% quorum requirement is the spam filter. Proposals without genuine community support simply expire.
 
 **The board cannot:**
 - Unilaterally change the protocol (requires community vote)
@@ -115,8 +118,7 @@ For reference — what community proposals can and cannot do:
 - Engage with Verra, Gold Standard, exchanges
 - Hire developers and auditors
 
-**If the community wants a protocol-funded treasury later:**
-Governance can vote to redirect a portion of settlement fees to a community pool. Example: change `FEE_STAKER_SHARE_BPS` from 10,000 (100%) to 9,500 (95% stakers, 5% community pool). This requires a standard governance proposal and community approval. It is not a pre-mine — it is ongoing earned revenue, transparently governed. Launch without it. Add it only if the community votes for it.
+**Community pool:** 20% of all settlement fees flow to the community pool automatically from day one — even with zero stakers. This accumulates in the `SHA256("community_pool")` keyless account. No human can spend from it without a passed governance proposal.
 
 ---
 
@@ -168,9 +170,23 @@ Security audits are non-negotiable before the network handles significant value.
 
 ### Bug Bounty
 
-Minimum pool: 10,000 TWL for critical findings (post-mining pool established).
-Scope: All pallets in production. Report to the board's published contact address.
-Response time commitment: 48 hours acknowledgement, 14 days triage.
+The board sets and publishes bounty amounts. There is no hard TWL denomination — the board must calibrate rewards against the current value of TWL and the severity of the finding. Pegging a fixed TWL amount is counterproductive: 10,000 TWL is nothing at launch and a fortune if TWL appreciates significantly.
+
+**Board responsibilities:**
+1. Publish the active bounty schedule (USD-denominated ranges are fine, paid in TWL at market rate at time of disclosure).
+2. Fund the bounty pool from community donations and partnership contributions — not from mined supply.
+3. Respond within 48 hours of any critical report. 14-day triage commitment.
+4. Publish all findings after remediation is deployed. No suppression.
+
+**Scope:** All pallets in production. Report to the board's published contact address.
+
+**Suggested severity tiers (board adjusts as chain matures):**
+| Severity | Example | Suggested Range |
+|----------|---------|----------------|
+| Critical | Settlement HTLC funds drained | Board discretion — significant |
+| High | Reserve valuation manipulation | Board discretion — meaningful |
+| Medium | Governance vote counting error | Board discretion — moderate |
+| Low / Informational | Edge-case crash, minor deviation | Acknowledgement + nominal reward |
 
 ---
 

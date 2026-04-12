@@ -51,11 +51,8 @@ pub mod pallet {
         #[pallet::constant]
         type EnactmentDelayBlocks: Get<BlockNumberFor<Self>>;
 
-        /// Deposit required to submit a proposal
-        #[pallet::constant]
-        type ProposalDeposit: Get<BalanceOf<Self>>;
-
-        /// Deposit required to nominate for board
+        /// Deposit required to nominate for board (2nd election onwards).
+        /// Genesis election has no deposit — TWL may not be circulating yet.
         #[pallet::constant]
         type NominationDeposit: Get<BalanceOf<Self>>;
 
@@ -106,7 +103,6 @@ pub mod pallet {
         pub proposer: T::AccountId,
         pub kind: ProposalKind<T>,
         pub status: ProposalStatus,
-        pub deposit: BalanceOf<T>,
         pub voting_ends: BlockNumberFor<T>,
         pub enactment_block: BlockNumberFor<T>,
     }
@@ -135,6 +131,12 @@ pub mod pallet {
     /// Whether a board has been seated (false at genesis until first election)
     #[pallet::storage]
     pub type BoardSeated<T: Config> = StorageValue<_, bool, ValueQuery>;
+
+    /// How many board elections have completed. 0 = genesis election not yet held.
+    /// Genesis election (ElectionCount == 0): no deposit, 1-person-1-vote.
+    /// All subsequent elections: normal TWL-weighted rules with NominationDeposit.
+    #[pallet::storage]
+    pub type ElectionCount<T: Config> = StorageValue<_, u32, ValueQuery>;
 
     /// Active proposals
     #[pallet::storage]
@@ -263,8 +265,9 @@ pub mod pallet {
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
-        /// Submit a proposal for community vote.
-        /// Requires ProposalDeposit (100 TWL). Refunded if approved, slashed if rejected.
+        /// Submit a proposal for community vote. No deposit required.
+        /// The 10% quorum requirement is the spam filter — proposals without
+        /// genuine community interest simply expire.
         #[pallet::call_index(0)]
         #[pallet::weight(Weight::from_parts(50_000_000, 0))]
         pub fn submit_proposal(
@@ -272,10 +275,6 @@ pub mod pallet {
             kind: ProposalKind<T>,
         ) -> DispatchResult {
             let proposer = ensure_signed(origin)?;
-
-            let deposit = T::ProposalDeposit::get();
-            T::Currency::reserve(&proposer, deposit)
-                .map_err(|_| Error::<T>::InsufficientDeposit)?;
 
             let now = frame_system::Pallet::<T>::block_number();
             let id = ProposalCount::<T>::get();
@@ -289,7 +288,6 @@ pub mod pallet {
                 proposer: proposer.clone(),
                 kind,
                 status: ProposalStatus::Voting,
-                deposit,
                 voting_ends,
                 enactment_block,
             });
@@ -349,7 +347,9 @@ pub mod pallet {
             Ok(())
         }
 
-        /// Nominate yourself for the board election. Requires NominationDeposit.
+        /// Nominate yourself for the board election.
+        /// Genesis election (first ever): no deposit required — TWL may not yet be circulating.
+        /// All subsequent elections require NominationDeposit (returned after election).
         #[pallet::call_index(2)]
         #[pallet::weight(Weight::from_parts(30_000_000, 0))]
         pub fn nominate_for_board(origin: OriginFor<T>) -> DispatchResult {
@@ -357,12 +357,17 @@ pub mod pallet {
             ensure!(ElectionActive::<T>::get(), Error::<T>::ElectionNotActive);
             ensure!(!Nominees::<T>::contains_key(&nominee), Error::<T>::AlreadyNominated);
 
-            let deposit = T::NominationDeposit::get();
-            T::Currency::reserve(&nominee, deposit)
-                .map_err(|_| Error::<T>::InsufficientDeposit)?;
+            let is_genesis_election = ElectionCount::<T>::get() == 0;
+            let deposit = if is_genesis_election {
+                BalanceOf::<T>::zero()
+            } else {
+                let d = T::NominationDeposit::get();
+                T::Currency::reserve(&nominee, d)
+                    .map_err(|_| Error::<T>::InsufficientDeposit)?;
+                d
+            };
 
             Nominees::<T>::insert(&nominee, deposit);
-
             Self::deposit_event(Event::NomineeRegistered { nominee, deposit });
             Ok(())
         }
@@ -379,7 +384,13 @@ pub mod pallet {
             ensure!(ElectionActive::<T>::get(), Error::<T>::ElectionNotActive);
             ensure!(Nominees::<T>::contains_key(&nominee), Error::<T>::NotANominee);
 
-            let weight = T::Currency::total_balance(&voter);
+            // Genesis election: 1 address = 1 vote (TWL may not be circulating yet).
+            // All subsequent elections: 1 TWL = 1 vote (balance-weighted).
+            let weight = if ElectionCount::<T>::get() == 0 {
+                BalanceOf::<T>::from(1u32)
+            } else {
+                T::Currency::total_balance(&voter)
+            };
             ElectionVotes::<T>::insert(&nominee, &voter, weight);
 
             Ok(())
@@ -414,14 +425,11 @@ pub mod pallet {
                 let quorum = total_issuance / 10u32.into();
 
                 if total_participating < quorum {
-                    // Quorum not met — expired, return deposit
+                    // Quorum not met — proposal expires silently. No penalty.
                     proposal.status = ProposalStatus::Expired;
-                    T::Currency::unreserve(&proposal.proposer, proposal.deposit);
                     Self::deposit_event(Event::ProposalExpired { proposal_id: id });
                 } else if tally.aye > tally.nay {
-                    // Approved — return deposit
                     proposal.status = ProposalStatus::Approved;
-                    T::Currency::unreserve(&proposal.proposer, proposal.deposit);
                     Self::deposit_event(Event::ProposalApproved {
                         proposal_id: id, aye: tally.aye, nay: tally.nay,
                     });
@@ -437,10 +445,7 @@ pub mod pallet {
                         proposal.status = ProposalStatus::Enacted;
                     }
                 } else {
-                    // Rejected — burn deposit. No treasury — slashed funds leave circulation.
                     proposal.status = ProposalStatus::Rejected;
-                    let freed = T::Currency::unreserve(&proposal.proposer, proposal.deposit);
-                    let _ = T::Currency::slash(&proposal.proposer, freed);
                     Self::deposit_event(Event::ProposalRejected {
                         proposal_id: id, aye: tally.aye, nay: tally.nay,
                     });
@@ -500,6 +505,7 @@ pub mod pallet {
             BoardMembers::<T>::put(bounded);
             BoardTermStart::<T>::put(now);
             BoardSeated::<T>::put(true);
+            ElectionCount::<T>::mutate(|c| *c = c.saturating_add(1));
 
             // Clean up election state
             ElectionActive::<T>::put(false);

@@ -175,7 +175,7 @@ Bootnodes help new nodes find the network. Run one if you have a stable public I
 ## 8. Governance
 
 All TWL holders can:
-- Submit proposals (100 TWL deposit)
+- Submit proposals (no deposit — quorum is the spam filter)
 - Vote on proposals (1 TWL = 1 vote)
 - Nominate for the board election
 - Vote in board elections

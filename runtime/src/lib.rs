@@ -206,8 +206,7 @@ parameter_types! {
     /// ~7 days at 6s blocks (7 * 24 * 3600 / 6)
     pub const VotingPeriodBlocks: BlockNumber = 100_800;
     pub const EnactmentDelayBlocks: BlockNumber = 100_800;
-    pub const ProposalDeposit: Balance = 100 * TWILL;
-    pub const NominationDeposit: Balance = 100 * TWILL;
+    pub const NominationDeposit: Balance = 100 * TWILL; // 2nd election onwards only
     pub const MaxNominees: u32 = 100;
     pub const MaxActiveProposals: u32 = 200;
 
@@ -397,7 +396,6 @@ impl pallet_governance::Config for Runtime {
     type BoardTermBlocks = BoardTermBlocks;
     type VotingPeriodBlocks = VotingPeriodBlocks;
     type EnactmentDelayBlocks = EnactmentDelayBlocks;
-    type ProposalDeposit = ProposalDeposit;
     type NominationDeposit = NominationDeposit;
     type MaxNominees = MaxNominees;
     type MaxActiveProposals = MaxActiveProposals;

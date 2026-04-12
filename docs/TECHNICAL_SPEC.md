@@ -1176,7 +1176,7 @@ Twill governance enables TWL holders to propose and vote on protocol changes. At
 
 | Parameter | Value |
 |-----------|-------|
-| Proposal deposit | 100 TWL (refunded if proposal passes) |
+| Proposal deposit | None (quorum is the spam filter) |
 | Voting period | 7 days (50,400 blocks at 6s per block = 302,400 seconds) |
 | Enactment delay | 7 days (after approval, before execution) |
 | Approval threshold | > 50% of participating stake |
@@ -1254,7 +1254,7 @@ enum VoteDirection {
 
 ```
 1. Proposal Submission
-   - Proposer submits ProposalType + deposits 100 TWL
+   - Any TWL holder submits ProposalType (no deposit required)
    - Proposal enters 'Pending' state
 
 2. Voting Period (7 days)
@@ -1263,8 +1263,8 @@ enum VoteDirection {
 
 3. Tally
    - If quorum met AND Aye > Nay: Approved
-   - If quorum met AND Nay >= Aye: Rejected (deposit burned)
-   - If quorum not met: Expired (deposit returned)
+   - If quorum met AND Nay >= Aye: Rejected
+   - If quorum not met: Expired (no deposit to return)
 
 4. Enactment Delay (7 days)
    - Approved proposals wait 7 days before execution
