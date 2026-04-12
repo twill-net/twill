@@ -28,6 +28,11 @@ The floor price rises as the network settles more.
 | USDC | Ethereum | Crypto | **Protocol ready** | Oracle nodes + bridge infrastructure |
 | Carbon (tCO2e) — Verra | Verra | Carbon | **Protocol ready** | Oracle nodes + Verra registry contact |
 | Carbon (tCO2e) — Gold Standard | GoldStandard | Carbon | **Protocol ready** | Oracle nodes + Gold Standard contact |
+| EUR (SEPA) | Sepa | Fiat | **Governance upgrade** | Community vote to activate + oracle nodes monitoring SEPA confirmations |
+| USD (ACH) | Ach | Fiat | **Governance upgrade** | Community vote to activate + oracle nodes monitoring ACH confirmations |
+| International wire | Swift | Fiat | **Governance upgrade** | Community vote to activate + oracle nodes monitoring SWIFT confirmations |
+| INR (UPI) | Upi | Fiat | **Governance upgrade** | Community vote to activate + oracle nodes monitoring UPI confirmations |
+| GBP (Faster Payments) | Faster | Fiat | **Governance upgrade** | Community vote to activate + oracle nodes monitoring Faster Payments confirmations |
 
 **"Protocol ready"** means the settlement engine, oracle pallet, and reserve pallet are
 fully implemented and compiled. The on-chain code is complete. The off-chain infrastructure
@@ -185,18 +190,66 @@ No bank. No broker. No SWIFT. No central counterparty. No custody of both assets
 
 ---
 
+## Protocol-Controlled Accounts
+
+These are keyless deterministic accounts. No private key exists for any of them.
+They are controlled entirely by the protocol — no human can spend from them directly.
+The community should monitor these addresses to verify fees are flowing correctly.
+
+### Fee Pool Account
+**Derivation:** `SHA256("fee_pool")`
+
+Holds settlement fees as a buffer before distributing the staker share (80%) to
+active PoSe validators each block. **When there are no active stakers**, the staker
+portion remains in this account accumulating until validators register. The 20%
+community share is always transferred to the community pool regardless of staker status.
+
+**Community action required:** None to activate. The account exists from genesis.
+The board should publish the derived SS58 address so anyone can monitor it on-chain.
+
+### Community Pool Account
+**Derivation:** `SHA256("community_pool")`
+
+Receives 20% of all settlement fees automatically every block fees are available —
+**even when there are zero stakers active**. This account accumulates from day one
+of settlement activity.
+
+**Community action required:**
+1. The board must publish the derived SS58 address so anyone can verify the balance.
+2. Governance proposes how to spend accumulated funds (audits, development, bounties).
+3. Community votes on any disbursement. No human can spend from this account without a passed governance proposal executing a runtime call.
+
+To derive the addresses yourself (verify them independently):
+```rust
+// In any Substrate environment:
+use sp_core::crypto::Ss58Codec;
+let community_pool = twill_primitives::derive_safety_wallet(b"community_pool");
+let fee_pool = twill_primitives::derive_safety_wallet(b"fee_pool");
+// Convert to SS58 AccountId for on-chain lookup
+```
+
+### Reserve Vault Account
+**Derivation:** `SHA256("reserve_vault")` (managed by pallet-reserve)
+
+Holds deposited reserve assets (wBTC, wETH, wUSDC, carbon credits). The reserve
+value is publicly auditable on-chain at all times via `pallet_reserve::TotalReserveValue`.
+
+---
+
 ## Community Activation Priority Order
 
 | Priority | Action | Unlocks |
 |----------|--------|---------|
-| 1 | Run oracle nodes (3+ independent) | Reserve valuation, floor price, Carbon/TWL pricing |
-| 2 | Engage Verra / Gold Standard | Verified carbon credit issuance at scale |
-| 3 | Deploy custodial BTC bridge | BTC ↔ TWL and BTC ↔ Carbon settlements |
-| 4 | Deploy custodial ETH/USDC bridge | ETH ↔ TWL and ETH ↔ Carbon settlements |
-| 5 | First live carbon registry settlement | Institutional credibility, partnership proof |
-| 6 | Transition to trustless MPC bridges | Full decentralization of reserve custody |
+| 1 | Publish pool account SS58 addresses | Transparency, community monitoring |
+| 2 | Run oracle nodes (3+ independent) | Reserve valuation, floor price, Carbon/TWL pricing |
+| 3 | Engage Verra / Gold Standard | Verified carbon credit issuance at scale |
+| 4 | Deploy custodial BTC bridge | BTC ↔ TWL and BTC ↔ Carbon settlements |
+| 5 | Deploy custodial ETH/USDC bridge | ETH ↔ TWL and ETH ↔ Carbon settlements |
+| 6 | First live carbon registry settlement | Institutional credibility, partnership proof |
+| 7 | Governance vote to activate fiat rails (SEPA, ACH, etc.) | Fiat ↔ TWL ↔ Carbon cross-border settlements |
+| 8 | Transition to trustless MPC bridges | Full decentralization of reserve custody |
 
-Each of these is a governance proposal + community vote. The protocol is ready.
+Each activation is a governance proposal + community vote. The protocol is ready.
 The community decides when and how to activate each rail.
 
 ---
