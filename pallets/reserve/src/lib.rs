@@ -1,0 +1,220 @@
+//! # Reserve Pallet
+//!
+//! Manages the Twill Reserve Vault — protocol-owned backing for TWL.
+//! Fully autonomous — no admin extrinsics. Deposits happen only via
+//! the settlement pallet's trait interface.
+//!
+//! ## BTC Model
+//!
+//! No human can manually deposit into or withdraw from the reserve.
+//! The settlement engine is the only path in. The reserve grows
+//! organically from real economic activity. Snapshots are automatic.
+
+#![cfg_attr(not(feature = "std"), no_std)]
+
+pub use pallet::*;
+
+#[frame_support::pallet]
+pub mod pallet {
+    use frame_support::pallet_prelude::*;
+    use frame_system::pallet_prelude::*;
+    use sp_core::H256;
+    use sp_runtime::traits::Saturating;
+    use twill_primitives::*;
+
+    /// Snapshot interval: every 100 blocks (~10 minutes). Hardcoded, not configurable.
+    const SNAPSHOT_INTERVAL: u32 = 100;
+
+    #[pallet::pallet]
+    pub struct Pallet<T>(_);
+
+    #[pallet::config]
+    pub trait Config: frame_system::Config {
+        type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
+
+        #[pallet::constant]
+        type MaxReserveAssets: Get<u32>;
+
+        /// Oracle for price feed queries (asset valuation)
+        type Oracle: twill_primitives::OracleInterface;
+    }
+
+    // -----------------------------------------------------------------------
+    // Storage
+    // -----------------------------------------------------------------------
+
+    #[pallet::storage]
+    pub type TotalReserveValue<T: Config> = StorageValue<_, u128, ValueQuery>;
+    #[pallet::storage]
+    pub type ReserveByAsset<T: Config> =
+        StorageMap<_, Blake2_128Concat, ReserveAssetKind, u128, ValueQuery>;
+    #[pallet::storage]
+    pub type DepositCount<T: Config> = StorageValue<_, u64, ValueQuery>;
+    #[pallet::storage]
+    pub type ReserveSnapshots<T: Config> =
+        StorageMap<_, Blake2_128Concat, BlockNumberFor<T>, u128>;
+    #[pallet::storage]
+    pub type LastSnapshotBlock<T: Config> = StorageValue<_, BlockNumberFor<T>, ValueQuery>;
+    #[pallet::storage]
+    pub type Deposits<T: Config> = StorageMap<
+        _, Blake2_128Concat, H256, ReserveDeposit<T>,
+    >;
+
+    // -----------------------------------------------------------------------
+    // Types
+    // -----------------------------------------------------------------------
+
+    #[derive(Clone, Encode, Decode, RuntimeDebugNoBound, TypeInfo, MaxEncodedLen)]
+    #[scale_info(skip_type_params(T))]
+    pub struct ReserveDeposit<T: Config> {
+        pub settlement_id: H256,
+        pub asset_kind: ReserveAssetKind,
+        pub value_twl: u128,
+        pub original_amount: u128,
+        pub deposited_at: BlockNumberFor<T>,
+    }
+
+    // -----------------------------------------------------------------------
+    // Events
+    // -----------------------------------------------------------------------
+
+    #[pallet::event]
+    #[pallet::generate_deposit(pub(super) fn deposit_event)]
+    pub enum Event<T: Config> {
+        ReserveDeposited {
+            settlement_id: H256,
+            asset_kind: ReserveAssetKind,
+            value_twl: u128,
+            total_reserve: u128,
+        },
+        ReserveSnapshot {
+            block_number: BlockNumberFor<T>,
+            total_value: u128,
+        },
+    }
+
+    #[pallet::error]
+    pub enum Error<T> {
+        ZeroValue,
+        ArithmeticOverflow,
+        DuplicateDeposit,
+    }
+
+    // -----------------------------------------------------------------------
+    // Hooks — automatic snapshots
+    // -----------------------------------------------------------------------
+
+    #[pallet::hooks]
+    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+        fn on_initialize(now: BlockNumberFor<T>) -> Weight {
+            let interval: BlockNumberFor<T> = SNAPSHOT_INTERVAL.into();
+            let last = LastSnapshotBlock::<T>::get();
+
+            if now.saturating_sub(last) >= interval {
+                let total = TotalReserveValue::<T>::get();
+                ReserveSnapshots::<T>::insert(now, total);
+                LastSnapshotBlock::<T>::put(now);
+                Self::deposit_event(Event::ReserveSnapshot {
+                    block_number: now, total_value: total,
+                });
+                return Weight::from_parts(10_000_000, 0);
+            }
+
+            Weight::zero()
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // NO EXTRINSICS. Reserve is protocol-controlled only.
+    // -----------------------------------------------------------------------
+
+    #[pallet::call]
+    impl<T: Config> Pallet<T> {}
+
+    // -----------------------------------------------------------------------
+    // ReserveInterface — the ONLY way deposits enter
+    // -----------------------------------------------------------------------
+
+    impl<T: Config> twill_primitives::ReserveInterface for Pallet<T> {
+        fn record_deposit(
+            settlement_id: H256,
+            asset_kind: ReserveAssetKind,
+            original_amount: u128,
+        ) {
+            if original_amount == 0 || Deposits::<T>::contains_key(settlement_id) {
+                return;
+            }
+
+            let value_twl = Self::oracle_value_twl(asset_kind, original_amount);
+            if value_twl == 0 {
+                return;
+            }
+
+            let now = frame_system::Pallet::<T>::block_number();
+
+            Deposits::<T>::insert(settlement_id, ReserveDeposit {
+                settlement_id, asset_kind, value_twl, original_amount, deposited_at: now,
+            });
+
+            TotalReserveValue::<T>::mutate(|t| *t = t.saturating_add(value_twl));
+            ReserveByAsset::<T>::mutate(asset_kind, |s| *s = s.saturating_add(value_twl));
+            DepositCount::<T>::mutate(|n| *n = n.saturating_add(1));
+
+            let total_reserve = TotalReserveValue::<T>::get();
+            Self::deposit_event(Event::ReserveDeposited {
+                settlement_id, asset_kind, value_twl, total_reserve,
+            });
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Public read-only interface
+    // -----------------------------------------------------------------------
+
+    impl<T: Config> Pallet<T> {
+        pub fn total_reserve() -> u128 { TotalReserveValue::<T>::get() }
+
+        pub fn reserve_for_asset(asset: ReserveAssetKind) -> u128 {
+            ReserveByAsset::<T>::get(asset)
+        }
+
+        pub fn floor_price(circulating_supply: u128) -> u128 {
+            if circulating_supply == 0 { return 0; }
+            TotalReserveValue::<T>::get().saturating_mul(TWILL) / circulating_supply
+        }
+
+        pub fn deposit_count() -> u64 { DepositCount::<T>::get() }
+
+        /// Oracle-based asset valuation. Falls back to raw amount.
+        pub fn oracle_value_twl(asset_kind: ReserveAssetKind, original_amount: u128) -> u128 {
+            let pair = match asset_kind {
+                ReserveAssetKind::BTC => Some(AssetPair::BtcTwl),
+                ReserveAssetKind::ETH => Some(AssetPair::EthTwl),
+                ReserveAssetKind::SOL => Some(AssetPair::SolTwl),
+                ReserveAssetKind::CarbonCredit => Some(AssetPair::CarbonTwl),
+                ReserveAssetKind::Other => None,
+            };
+
+            if let Some(p) = pair {
+                if let Some(price) = T::Oracle::get_price(p) {
+                    if price > 0 {
+                        return original_amount.saturating_mul(price) / TWILL;
+                    }
+                }
+            }
+            original_amount
+        }
+
+        pub fn composition() -> (u16, u16, u16, u16) {
+            let total = TotalReserveValue::<T>::get();
+            if total == 0 { return (0, 0, 0, 0); }
+            let to_bps = |v: u128| -> u16 { ((v.saturating_mul(10_000)) / total) as u16 };
+            (
+                to_bps(ReserveByAsset::<T>::get(ReserveAssetKind::BTC)),
+                to_bps(ReserveByAsset::<T>::get(ReserveAssetKind::ETH)),
+                to_bps(ReserveByAsset::<T>::get(ReserveAssetKind::SOL)),
+                to_bps(ReserveByAsset::<T>::get(ReserveAssetKind::CarbonCredit)),
+            )
+        }
+    }
+}

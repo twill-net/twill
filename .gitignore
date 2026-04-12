@@ -1,0 +1,32 @@
+# Build artifacts
+target/
+
+# Chain data — your local blockchain copy, never commit
+/chain-data/
+/bootnode-data/
+/data/
+/tmp/
+
+# Generated chain specs (keep mainnet-raw.json if you want)
+# mainnet-raw.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Keys — NEVER commit private keys
+*.key
+*.pem
+*.seed
+
+# Node data
+/chains/
+
+# Node.js dependencies
+node_modules/

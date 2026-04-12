@@ -1,0 +1,52 @@
+[package]
+name = "twill-node"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Twill Network node binary"
+build = "build.rs"
+
+[[bin]]
+name = "twill"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4.4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+jsonrpsee = { version = "0.24", features = ["server"] }
+futures = "0.3"
+
+# Substrate Client
+sc-service = { workspace = true }
+sc-cli = { workspace = true }
+sc-executor = { workspace = true }
+sc-consensus = { workspace = true }
+sc-consensus-manual-seal = { workspace = true }
+sc-client-api = { workspace = true }
+sp-blockchain = { workspace = true }
+sc-network = { workspace = true }
+sc-basic-authorship = { workspace = true }
+sc-transaction-pool = { workspace = true }
+sc-transaction-pool-api = { workspace = true }
+sc-offchain = { workspace = true }
+sc-telemetry = { workspace = true }
+sc-rpc-api = { workspace = true }
+substrate-frame-rpc-system = { workspace = true }
+pallet-transaction-payment-rpc = { workspace = true }
+
+# Substrate Primitives
+sp-core = { workspace = true, features = ["std"] }
+sp-runtime = { workspace = true, features = ["std"] }
+sp-consensus = { workspace = true }
+sp-api = { workspace = true, features = ["std"] }
+sp-block-builder = { workspace = true, features = ["std"] }
+sp-timestamp = { workspace = true, features = ["std"] }
+sp-keyring = { workspace = true }
+sp-io = { workspace = true, features = ["std"] }
+
+# Runtime
+twill-runtime = { path = "../runtime", features = ["std"] }
+twill-primitives = { workspace = true, features = ["std"] }
+
+# No external build dependencies — build.rs is self-contained

@@ -1,0 +1,40 @@
+{
+  "rpc": {
+    "info": "Connect to Twill Network via Polkadot.js Apps",
+    "usage": "Go to https://polkadot.js.org/apps → Settings → General → Custom endpoint",
+    "endpoint": "wss://rpc.twill.network"
+  },
+  "chain": {
+    "name": "Twill Network",
+    "id": "twill",
+    "protocolId": "twl",
+    "ss58Format": 42
+  },
+  "token": {
+    "symbol": "TWL",
+    "decimals": 12,
+    "existentialDeposit": "10000000000"
+  },
+  "types": {},
+  "typesBundle": {},
+  "typesChain": {},
+  "typesSpec": {
+    "twill": {}
+  },
+  "rpc_methods": [
+    "author_submitExtrinsic",
+    "chain_getBlock",
+    "chain_getBlockHash",
+    "chain_getFinalizedHead",
+    "chain_getHeader",
+    "state_call",
+    "state_getMetadata",
+    "state_getStorage",
+    "state_queryStorageAt",
+    "system_accountNextIndex",
+    "system_chain",
+    "system_health",
+    "system_name",
+    "system_version"
+  ]
+}
