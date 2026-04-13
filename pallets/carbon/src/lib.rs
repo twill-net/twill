@@ -81,6 +81,13 @@ pub mod pallet {
     pub type IssuanceBonds<T: Config> =
         StorageMap<_, Blake2_128Concat, H256, (T::AccountId, BalanceOf<T>, BlockNumberFor<T>)>;
 
+    /// Off-chain registry confirmation hashes for retired credits.
+    /// Maps credit_id → registry_confirmation_hash (e.g. Verra/GoldStandard API response).
+    /// Populated by governance-dispatched calls from registry relay nodes.
+    #[pallet::storage]
+    pub type RegistryConfirmations<T: Config> =
+        StorageMap<_, Blake2_128Concat, H256, H256>;
+
     // -----------------------------------------------------------------------
     // Types
     // -----------------------------------------------------------------------
@@ -126,6 +133,13 @@ pub mod pallet {
         /// Bond slashed by governance — issuer posted a fraudulent or invalid credit.
         /// Slashed TWL is burned (deflationary). Credit permanently invalidated.
         BondSlashed { credit_id: H256, issuer: T::AccountId, amount: BalanceOf<T> },
+        /// Off-chain registry confirmed this retirement (Verra/GoldStandard API response).
+        /// registry_confirmation_hash is the SHA256 of the registry's confirmation payload.
+        RetirementRegistryConfirmed {
+            credit_id: H256,
+            registry_confirmation_hash: H256,
+            confirmed_at: BlockNumberFor<T>,
+        },
     }
 
     #[pallet::error]
@@ -143,6 +157,10 @@ pub mod pallet {
         BondNotFound,
         /// Credit has already been slashed — permanently invalid
         AlreadySlashed,
+        /// Registry confirmation requires the credit to be in Retired status
+        CreditNotRetired,
+        /// Registry confirmation already recorded for this credit
+        AlreadyConfirmed,
     }
 
     // -----------------------------------------------------------------------
@@ -357,6 +375,41 @@ pub mod pallet {
                 credit_id,
                 issuer,
                 amount: slashed_amount,
+            });
+
+            Ok(())
+        }
+
+        /// Confirm that an off-chain carbon registry (Verra, GoldStandard) has recorded
+        /// the retirement. Called via root (governance-dispatched) by registry relay nodes
+        /// that watch CreditRetired events and confirm with the external registry API.
+        ///
+        /// The registry_confirmation_hash is the SHA256 of the registry's confirmation
+        /// response payload — permanently linking the on-chain retirement to the
+        /// off-chain registry record.
+        #[pallet::call_index(6)]
+        #[pallet::weight(Weight::from_parts(30_000_000, 0))]
+        pub fn confirm_registry_retirement(
+            origin: OriginFor<T>,
+            credit_id: H256,
+            registry_confirmation_hash: H256,
+        ) -> DispatchResult {
+            ensure_root(origin)?;
+
+            let credit = Credits::<T>::get(credit_id).ok_or(Error::<T>::CreditNotFound)?;
+            ensure!(credit.status == CarbonStatus::Retired, Error::<T>::CreditNotRetired);
+            ensure!(
+                !RegistryConfirmations::<T>::contains_key(credit_id),
+                Error::<T>::AlreadyConfirmed
+            );
+
+            let now = frame_system::Pallet::<T>::block_number();
+            RegistryConfirmations::<T>::insert(credit_id, registry_confirmation_hash);
+
+            Self::deposit_event(Event::RetirementRegistryConfirmed {
+                credit_id,
+                registry_confirmation_hash,
+                confirmed_at: now,
             });
 
             Ok(())

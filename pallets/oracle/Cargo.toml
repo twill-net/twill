@@ -14,6 +14,7 @@ frame-system = { workspace = true }
 sp-core = { workspace = true }
 sp-std = { workspace = true }
 sp-runtime = { workspace = true }
+sp-io = { workspace = true }
 
 twill-primitives = { workspace = true }
 
@@ -27,5 +28,6 @@ std = [
     "sp-core/std",
     "sp-std/std",
     "sp-runtime/std",
+    "sp-io/std",
     "twill-primitives/std",
 ]

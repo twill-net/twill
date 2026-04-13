@@ -5053,6 +5053,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pallet-bridge"
+version = "0.1.0"
+dependencies = [
+ "frame-support",
+ "frame-system",
+ "parity-scale-codec",
+ "scale-info",
+ "sp-core",
+ "sp-std",
+ "twill-primitives",
+]
+
+[[package]]
 name = "pallet-carbon"
 version = "0.1.0"
 dependencies = [
@@ -5109,6 +5122,7 @@ dependencies = [
  "parity-scale-codec",
  "scale-info",
  "sp-core",
+ "sp-io",
  "sp-runtime",
  "sp-std",
  "twill-primitives",
@@ -9658,6 +9672,7 @@ dependencies = [
  "frame-system-rpc-runtime-api",
  "pallet-assets",
  "pallet-balances",
+ "pallet-bridge",
  "pallet-carbon",
  "pallet-governance",
  "pallet-mining",

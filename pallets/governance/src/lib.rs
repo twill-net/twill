@@ -19,11 +19,22 @@ pub use pallet::*;
 pub mod pallet {
     use frame_support::{
         pallet_prelude::*,
-        traits::{Currency, ReservableCurrency, Get},
+        traits::{Currency, ExistenceRequirement, ReservableCurrency, Get},
     };
     use frame_system::pallet_prelude::*;
     use sp_runtime::traits::{Saturating, Zero};
     use twill_primitives::MiningInterface;
+
+    /// TWL mined threshold at which proposal voting auto-switches from 1-address-1-vote
+    /// (Equal) to TWL-weighted. Set to 1 million TWL (2% of total supply).
+    /// Below this threshold early governance is egalitarian — whoever mined first
+    /// cannot dominate. Above it, stake is the sybil-resistance mechanism.
+    const VOTING_PHASE_SWITCH_THRESHOLD: u128 = 1_000_000 * twill_primitives::TWILL;
+
+    /// Default maximum vote weight per address in TwlWeighted phase.
+    /// Capped at 100,000 TWL (0.2% of supply) to prevent whale domination.
+    /// Governance can adjust via SetMaxVoteWeight proposal.
+    const DEFAULT_MAX_VOTE_WEIGHT_TWL: u128 = 100_000 * twill_primitives::TWILL;
 
     type BalanceOf<T> =
         <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
@@ -77,6 +88,16 @@ pub mod pallet {
     // Types
     // -----------------------------------------------------------------------
 
+    /// Which weighting scheme is used for proposal votes.
+    #[derive(Clone, Copy, PartialEq, Eq, Encode, Decode, RuntimeDebug, TypeInfo, MaxEncodedLen, Default)]
+    pub enum VotingPhase {
+        /// 1-address-1-vote. Active from genesis until VOTING_PHASE_SWITCH_THRESHOLD is mined.
+        #[default]
+        Equal,
+        /// Balance-weighted with per-address cap. Active once enough TWL circulates.
+        TwlWeighted,
+    }
+
     #[derive(Clone, PartialEqNoBound, EqNoBound, Encode, Decode, RuntimeDebugNoBound, TypeInfo, MaxEncodedLen)]
     #[scale_info(skip_type_params(T))]
     pub enum ProposalKind<T: Config> {
@@ -98,6 +119,12 @@ pub mod pallet {
         /// The community votes on both. EVM is live only after both proposals are enacted.
         /// Once activated, any Solidity contract deployable on Ethereum deploys on Twill unchanged.
         ActivateEvm,
+        /// Switch proposal voting to TWL-weighted mode early (before the automatic threshold).
+        /// Useful if the community decides it is ready before 1M TWL is mined.
+        SwitchToTwlWeightedVoting,
+        /// Adjust the maximum vote weight per address in TwlWeighted phase (in planck).
+        /// Prevents whales from capturing governance. Default: 100,000 TWL.
+        SetMaxVoteWeight { twl_amount: u128 },
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, Encode, Decode, RuntimeDebug, TypeInfo, MaxEncodedLen)]
@@ -214,6 +241,15 @@ pub mod pallet {
     #[pallet::storage]
     pub type ElectionStartBlock<T: Config> = StorageValue<_, BlockNumberFor<T>, ValueQuery>;
 
+    /// Current proposal voting phase (Equal until 1M TWL mined, then TwlWeighted).
+    #[pallet::storage]
+    pub type CurrentVotingPhase<T: Config> = StorageValue<_, VotingPhase, ValueQuery>;
+
+    /// Maximum vote weight per address in TwlWeighted phase (in planck).
+    /// Default: DEFAULT_MAX_VOTE_WEIGHT_TWL. Adjustable via SetMaxVoteWeight proposal.
+    #[pallet::storage]
+    pub type MaxVoteWeightPlanck<T: Config> = StorageValue<_, u128, ValueQuery>;
+
     // -----------------------------------------------------------------------
     // Events
     // -----------------------------------------------------------------------
@@ -249,6 +285,10 @@ pub mod pallet {
         /// The board must now submit a RuntimeUpgrade proposal with the Frontier-enabled WASM
         /// for EVM execution to become available on-chain.
         EvmActivationApproved { block_number: BlockNumberFor<T> },
+        /// Proposal voting switched from Equal to TwlWeighted
+        VotingPhaseSwitched { new_phase: VotingPhase, block_number: BlockNumberFor<T> },
+        /// MaxVoteWeight updated by governance
+        MaxVoteWeightUpdated { new_limit_planck: u128 },
     }
 
     #[pallet::error]
@@ -274,6 +314,23 @@ pub mod pallet {
     #[pallet::hooks]
     impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
         fn on_initialize(now: BlockNumberFor<T>) -> Weight {
+            // Initialize MaxVoteWeightPlanck if not yet set
+            if MaxVoteWeightPlanck::<T>::get() == 0 {
+                MaxVoteWeightPlanck::<T>::put(DEFAULT_MAX_VOTE_WEIGHT_TWL);
+            }
+
+            // Auto-switch proposal voting phase when enough TWL is mined
+            if CurrentVotingPhase::<T>::get() == VotingPhase::Equal {
+                let total_minted = T::MiningProvider::total_minted();
+                if total_minted >= VOTING_PHASE_SWITCH_THRESHOLD {
+                    CurrentVotingPhase::<T>::put(VotingPhase::TwlWeighted);
+                    Self::deposit_event(Event::VotingPhaseSwitched {
+                        new_phase: VotingPhase::TwlWeighted,
+                        block_number: now,
+                    });
+                }
+            }
+
             // Check if board term expired → trigger election
             if BoardSeated::<T>::get() && !ElectionActive::<T>::get() {
                 let term_start = BoardTermStart::<T>::get();
@@ -371,8 +428,19 @@ pub mod pallet {
 
             ensure!(!Votes::<T>::contains_key(proposal_id, &voter), Error::<T>::AlreadyVoted);
 
-            // Vote weight = total balance (free + reserved)
-            let weight = T::Currency::total_balance(&voter);
+            // Vote weight depends on phase:
+            // Equal: 1 vote per address (early governance, egalitarian)
+            // TwlWeighted: balance-weighted with per-address cap (sybil-resistant)
+            let weight = match CurrentVotingPhase::<T>::get() {
+                VotingPhase::Equal => BalanceOf::<T>::from(1u32),
+                VotingPhase::TwlWeighted => {
+                    let balance = T::Currency::total_balance(&voter);
+                    let max_planck = MaxVoteWeightPlanck::<T>::get();
+                    let max_balance: BalanceOf<T> = max_planck
+                        .try_into().unwrap_or_else(|_| BalanceOf::<T>::zero());
+                    balance.min(max_balance)
+                },
+            };
 
             Votes::<T>::insert(proposal_id, &voter, direction);
 
@@ -448,7 +516,8 @@ pub mod pallet {
 
     impl<T: Config> Pallet<T> {
         /// Distribute board pay from the treasury to each seated member equally.
-        /// Skips silently if: pay is 0, no board is seated, or treasury is insufficient.
+        /// All-or-nothing: if the treasury cannot cover ALL members, NO member gets paid.
+        /// This prevents the first-in-vec members from being favoured over later ones.
         /// Never mints new TWL — treasury-only source.
         fn distribute_board_pay() {
             let pay_per_block = BoardPayPerBlock::<T>::get();
@@ -463,18 +532,25 @@ pub mod pallet {
             let per_member = pay_per_block / count.into();
             if per_member.is_zero() { return; }
 
+            let total_needed = per_member.saturating_mul(count.into());
             let treasury = T::TreasuryAccount::get();
+            let treasury_balance = T::Currency::free_balance(&treasury);
+
+            // Must be able to cover everyone + keep treasury alive
+            if treasury_balance < total_needed.saturating_add(T::Currency::minimum_balance()) {
+                Self::deposit_event(Event::BoardPaySkipped);
+                return;
+            }
+
+            // Pre-check passed — distribute to all members
             for member in members.iter() {
-                if T::Currency::transfer(
+                // Cannot fail: we verified balance above
+                let _ = T::Currency::transfer(
                     &treasury,
                     member,
                     per_member,
-                    frame_support::traits::ExistenceRequirement::KeepAlive,
-                ).is_err() {
-                    // Treasury insufficient — skip remaining payments this block
-                    Self::deposit_event(Event::BoardPaySkipped);
-                    return;
-                }
+                    ExistenceRequirement::KeepAlive,
+                );
             }
             Self::deposit_event(Event::BoardPayDistributed { per_member, member_count: count });
         }
@@ -544,6 +620,29 @@ pub mod pallet {
                         EvmEnabled::<T>::put(true);
                         let block_number = frame_system::Pallet::<T>::block_number();
                         Self::deposit_event(Event::EvmActivationApproved { block_number });
+                        proposal.status = ProposalStatus::Enacted;
+                    }
+
+                    // Early switch to TWL-weighted voting (community can vote to switch
+                    // before the automatic 1M TWL threshold is reached)
+                    if let ProposalKind::SwitchToTwlWeightedVoting = proposal.kind {
+                        if CurrentVotingPhase::<T>::get() == VotingPhase::Equal {
+                            CurrentVotingPhase::<T>::put(VotingPhase::TwlWeighted);
+                            let block_number = frame_system::Pallet::<T>::block_number();
+                            Self::deposit_event(Event::VotingPhaseSwitched {
+                                new_phase: VotingPhase::TwlWeighted,
+                                block_number,
+                            });
+                        }
+                        proposal.status = ProposalStatus::Enacted;
+                    }
+
+                    // Adjust max vote weight cap in TwlWeighted phase
+                    if let ProposalKind::SetMaxVoteWeight { twl_amount } = proposal.kind {
+                        MaxVoteWeightPlanck::<T>::put(twl_amount);
+                        Self::deposit_event(Event::MaxVoteWeightUpdated {
+                            new_limit_planck: twl_amount,
+                        });
                         proposal.status = ProposalStatus::Enacted;
                     }
                 } else {

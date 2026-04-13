@@ -19,16 +19,22 @@ pub use pallet::*;
 #[frame_support::pallet]
 pub mod pallet {
     use frame_support::pallet_prelude::*;
-    use frame_system::pallet_prelude::*;
-    use sp_runtime::traits::Saturating;
+    use frame_system::{offchain::SendTransactionTypes, pallet_prelude::*};
+    use sp_runtime::{offchain as ocw, traits::{Saturating, Zero}};
     use sp_std::vec::Vec;
     use twill_primitives::*;
+
+    /// Key identifying this pallet's offchain-worker activity in local storage
+    pub const KEY_TYPE: sp_core::crypto::KeyTypeId = sp_core::crypto::KeyTypeId(*b"twl_");
+
+    /// OCW fires every N blocks (10 blocks ≈ 60 s at 6 s block time)
+    const OCW_INTERVAL: u32 = 10;
 
     #[pallet::pallet]
     pub struct Pallet<T>(_);
 
     #[pallet::config]
-    pub trait Config: frame_system::Config {
+    pub trait Config: frame_system::Config + SendTransactionTypes<Call<Self>> {
         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
 
         /// Maximum price submissions tracked per pair
@@ -79,6 +85,13 @@ pub mod pallet {
     pub type LastKnownPrice<T: Config> =
         StorageMap<_, Blake2_128Concat, AssetPair, (u128, BlockNumberFor<T>), OptionQuery>;
 
+    /// Prices submitted by the off-chain worker (automated exchange feed).
+    /// Lower trust than settlement-derived or validator-consensus prices — used as
+    /// a fallback when no validator submissions are fresh.
+    #[pallet::storage]
+    pub type OcwPrices<T: Config> =
+        StorageMap<_, Blake2_128Concat, AssetPair, (u128, BlockNumberFor<T>), OptionQuery>;
+
     // -----------------------------------------------------------------------
     // Types
     // -----------------------------------------------------------------------
@@ -101,6 +114,8 @@ pub mod pallet {
         PriceSubmitted { submitter: T::AccountId, pair: AssetPair, price: u128 },
         CanonicalPriceUpdated { pair: AssetPair, price: u128, source_count: u8 },
         SettlementPriceUpdated { pair: AssetPair, price: u128 },
+        /// An off-chain worker submitted an automated price update
+        OcwPriceUpdated { pair: AssetPair, price: u128 },
     }
 
     #[pallet::error]
@@ -109,6 +124,21 @@ pub mod pallet {
         NotActiveValidator,
         /// Price cannot be zero
         ZeroPrice,
+    }
+
+    // -----------------------------------------------------------------------
+    // Off-chain worker hook — auto-fetches prices every OCW_INTERVAL blocks
+    // -----------------------------------------------------------------------
+
+    #[pallet::hooks]
+    impl<T: Config> Hooks<BlockNumberFor<T>> for Pallet<T> {
+        fn offchain_worker(block_number: BlockNumberFor<T>) {
+            let interval: BlockNumberFor<T> = (OCW_INTERVAL as u32).into();
+            if !(block_number % interval).is_zero() {
+                return;
+            }
+            Self::ocw_fetch_and_submit();
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -152,6 +182,53 @@ pub mod pallet {
             Self::recalculate_median(pair);
 
             Ok(())
+        }
+
+        /// OCW-submitted price update. Unsigned — accepted only from this node's own worker.
+        /// Validators configure their exchange endpoint in offchain local storage to enable this.
+        #[pallet::call_index(1)]
+        #[pallet::weight(Weight::from_parts(30_000_000, 0))]
+        pub fn submit_price_unsigned(
+            origin: OriginFor<T>,
+            pair: AssetPair,
+            price: u128,
+        ) -> DispatchResult {
+            ensure_none(origin)?;
+            ensure!(price > 0, Error::<T>::ZeroPrice);
+
+            let now = frame_system::Pallet::<T>::block_number();
+            OcwPrices::<T>::insert(pair, (price, now));
+
+            Self::deposit_event(Event::OcwPriceUpdated { pair, price });
+            Ok(())
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // ValidateUnsigned — only accept OCW prices from this node itself
+    // -----------------------------------------------------------------------
+
+    #[pallet::validate_unsigned]
+    impl<T: Config> ValidateUnsigned for Pallet<T> {
+        type Call = Call<T>;
+
+        fn validate_unsigned(source: TransactionSource, call: &Self::Call) -> TransactionValidity {
+            if let Call::submit_price_unsigned { price, .. } = call {
+                // Only accept from the local node's OCW, never from external peers
+                if source != TransactionSource::Local && source != TransactionSource::InBlock {
+                    return InvalidTransaction::Call.into();
+                }
+                if *price == 0 {
+                    return InvalidTransaction::Custom(1).into();
+                }
+                ValidTransaction::with_tag_prefix("TwillOracleOcw")
+                    .priority(TransactionPriority::MAX / 2)
+                    .longevity(5)
+                    .propagate(false) // Never relay to peers
+                    .build()
+            } else {
+                InvalidTransaction::Call.into()
+            }
         }
     }
 
@@ -201,6 +278,81 @@ pub mod pallet {
             });
         }
 
+        // -----------------------------------------------------------------------
+        // Off-chain worker — internal helpers
+        // -----------------------------------------------------------------------
+
+        /// Fetch prices from the validator's configured endpoint and submit unsigned transactions.
+        /// Validators opt in by setting local storage key "twill::oracle::endpoint" to their
+        /// exchange API URL. Expected JSON: {"btc_twl":12345,"eth_twl":678,...}
+        fn ocw_fetch_and_submit() {
+            let endpoint_bytes = match sp_io::offchain::local_storage_get(
+                ocw::StorageKind::PERSISTENT,
+                b"twill::oracle::endpoint",
+            ) {
+                Some(ep) => ep,
+                None => return, // Not configured — opt-in, no default
+            };
+
+            let endpoint = match core::str::from_utf8(&endpoint_bytes) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+
+            let request = match ocw::http::Request::get(endpoint).send() {
+                Ok(p) => p,
+                Err(_) => return,
+            };
+
+            let timeout = sp_io::offchain::timestamp()
+                .add(ocw::Duration::from_millis(3_000));
+
+            let response = match request.try_wait(timeout) {
+                Ok(Ok(r)) if r.code == 200 => r,
+                _ => return,
+            };
+
+            let body = response.body().collect::<Vec<u8>>();
+
+            let pairs: &[(&[u8], AssetPair)] = &[
+                (b"btc_twl",    AssetPair::BtcTwl),
+                (b"eth_twl",    AssetPair::EthTwl),
+                (b"sol_twl",    AssetPair::SolTwl),
+                (b"carbon_twl", AssetPair::CarbonTwl),
+                (b"usd_twl",    AssetPair::UsdTwl),
+                (b"eur_twl",    AssetPair::EurTwl),
+            ];
+
+            for (key, pair) in pairs {
+                if let Some(price) = Self::extract_json_u128(&body, key) {
+                    if price > 0 {
+                        let call = Call::submit_price_unsigned { pair: *pair, price };
+                        let _ = frame_system::offchain::SubmitTransaction::<T, Call<T>>
+                            ::submit_unsigned_transaction(call.into());
+                    }
+                }
+            }
+        }
+
+        /// Extract a u128 value from a JSON object for a given key.
+        /// Handles the fixed format: {"key": 12345, ...}
+        fn extract_json_u128(json: &[u8], key: &[u8]) -> Option<u128> {
+            let mut pattern = Vec::new();
+            pattern.push(b'"');
+            pattern.extend_from_slice(key);
+            pattern.extend_from_slice(b"\":");
+
+            let pos = json.windows(pattern.len()).position(|w| w == pattern.as_slice())?;
+            let after = &json[pos + pattern.len()..];
+
+            let start = after.iter().position(|&b| matches!(b, b'0'..=b'9'))?;
+            let rest = &after[start..];
+            let end = rest.iter().position(|&b| !b.is_ascii_digit()).unwrap_or(rest.len());
+            if end == 0 { return None; }
+
+            core::str::from_utf8(&rest[..end]).ok()?.parse::<u128>().ok()
+        }
+
         /// Record a settlement-derived price.
         pub fn record_settlement_price(pair: AssetPair, price: u128) {
             let now = frame_system::Pallet::<T>::block_number();
@@ -236,6 +388,13 @@ pub mod pallet {
             if let Some(cp) = CanonicalPrices::<T>::get(pair) {
                 if now.saturating_sub(cp.updated_at) <= threshold {
                     return Some(cp.price);
+                }
+            }
+
+            // OCW fallback: automated exchange feed, lower trust than validators
+            if let Some((ocw_price, ocw_block)) = OcwPrices::<T>::get(pair) {
+                if now.saturating_sub(ocw_block) <= threshold {
+                    return Some(ocw_price);
                 }
             }
 

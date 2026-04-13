@@ -10,6 +10,7 @@ members = [
     "pallets/twl-token",
     "pallets/oracle",
     "pallets/governance",
+    "pallets/bridge",
     "primitives",
 ]
 
@@ -70,6 +71,7 @@ pallet-carbon = { path = "pallets/carbon", default-features = false }
 pallet-twl-token = { path = "pallets/twl-token", default-features = false }
 pallet-oracle = { path = "pallets/oracle", default-features = false }
 pallet-governance = { path = "pallets/governance", default-features = false }
+pallet-bridge = { path = "pallets/bridge", default-features = false }
 
 # Frontier (EVM Compatibility) — planned for future implementation
 # pallet-evm = { git = "https://github.com/polkadot-evm/frontier", branch = "stable2409", default-features = false }

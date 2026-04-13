@@ -91,6 +91,13 @@ pub mod pallet {
             block_number: BlockNumberFor<T>,
             total_value: u128,
         },
+        /// Reserve revalued at current oracle prices (mark-to-market).
+        /// Permissionless — anyone can call revalue() at any time.
+        ReserveRevalued {
+            old_total: u128,
+            new_total: u128,
+            block_number: BlockNumberFor<T>,
+        },
     }
 
     #[pallet::error]
@@ -125,11 +132,26 @@ pub mod pallet {
     }
 
     // -----------------------------------------------------------------------
-    // NO EXTRINSICS. Reserve is protocol-controlled only.
+    // Extrinsics
     // -----------------------------------------------------------------------
 
     #[pallet::call]
-    impl<T: Config> Pallet<T> {}
+    impl<T: Config> Pallet<T> {
+        /// Permissionless mark-to-market: revalue all reserve deposits at current oracle prices.
+        ///
+        /// Any account can call this. It is O(all deposits) but has no state risk —
+        /// it only reads oracle prices and updates the stored TWL valuations.
+        ///
+        /// Useful after a large oracle price move to bring `TotalReserveValue` up to date
+        /// so that `floor_price()` returns an accurate current reading.
+        #[pallet::call_index(0)]
+        #[pallet::weight(Weight::from_parts(500_000_000, 0))]
+        pub fn revalue(origin: OriginFor<T>) -> DispatchResult {
+            ensure_signed(origin)?; // Anyone may call
+            Self::revalue_reserves();
+            Ok(())
+        }
+    }
 
     // -----------------------------------------------------------------------
     // ReserveInterface — the ONLY way deposits enter
@@ -184,6 +206,52 @@ pub mod pallet {
         }
 
         pub fn deposit_count() -> u64 { DepositCount::<T>::get() }
+
+        /// Revalue all reserve deposits at current oracle prices (mark-to-market).
+        /// Called by the permissionless `revalue` extrinsic.
+        pub fn revalue_reserves() {
+            let old_total = TotalReserveValue::<T>::get();
+            let now = frame_system::Pallet::<T>::block_number();
+
+            // Rebuild totals from scratch
+            let mut new_total: u128 = 0;
+            let mut new_by_asset: sp_std::collections::btree_map::BTreeMap<u8, u128> =
+                sp_std::collections::btree_map::BTreeMap::new();
+
+            // Iterate all deposits and recompute current oracle value
+            for (_, mut deposit) in Deposits::<T>::iter() {
+                let new_value = Self::oracle_value_twl(deposit.asset_kind, deposit.original_amount);
+                // Store updated value back into the deposit record
+                deposit.value_twl = new_value;
+                Deposits::<T>::insert(deposit.settlement_id, deposit.clone());
+
+                new_total = new_total.saturating_add(new_value);
+                let asset_key = deposit.asset_kind as u8;
+                let entry = new_by_asset.entry(asset_key).or_insert(0u128);
+                *entry = entry.saturating_add(new_value);
+            }
+
+            TotalReserveValue::<T>::put(new_total);
+
+            // Update per-asset totals
+            let assets = [
+                ReserveAssetKind::BTC,
+                ReserveAssetKind::ETH,
+                ReserveAssetKind::SOL,
+                ReserveAssetKind::CarbonCredit,
+                ReserveAssetKind::Other,
+            ];
+            for asset in assets {
+                let val = *new_by_asset.get(&(asset as u8)).unwrap_or(&0u128);
+                ReserveByAsset::<T>::insert(asset, val);
+            }
+
+            Self::deposit_event(Event::ReserveRevalued {
+                old_total,
+                new_total,
+                block_number: now,
+            });
+        }
 
         /// Oracle-based asset valuation. Falls back to raw amount.
         pub fn oracle_value_twl(asset_kind: ReserveAssetKind, original_amount: u128) -> u128 {

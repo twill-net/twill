@@ -121,7 +121,7 @@ pub const VERSION: sp_version::RuntimeVersion = sp_version::RuntimeVersion {
     spec_name: create_runtime_str!("twill"),
     impl_name: create_runtime_str!("twill-node"),
     authoring_version: 1,
-    spec_version: 101,
+    spec_version: 102,
     impl_version: 1,
     apis: RUNTIME_API_VERSIONS,
     transaction_version: 1,
@@ -198,6 +198,10 @@ parameter_types! {
 
     // Reserve
     pub const MaxReserveAssets: u32 = 20;
+
+    // Bridge
+    pub const MaxRelayers: u32 = 20;
+    pub const MaxConfirmationsPerDeposit: u32 = 10;
 
     // Governance
     pub const MaxBoardMembers: u32 = 7;
@@ -350,6 +354,7 @@ impl pallet_settlement::Config for Runtime {
     type ReserveProvider = Reserve;
     type CarbonProvider = Carbon;
     type OracleProvider = Oracle;
+    type BridgeProvider = Bridge;
     type MaxExpiryPerBlock = MaxExpiryPerBlock;
 }
 
@@ -366,6 +371,7 @@ impl pallet_mining::Config for Runtime {
     type MinPoseStake = MinPoseStake;
     type FeePoolAccount = FeePoolAccount;
     type TreasuryAccount = TreasuryAccount;
+    type UnixTime = Timestamp;
 }
 
 impl pallet_carbon::Config for Runtime {
@@ -381,6 +387,14 @@ impl pallet_twl_token::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Currency = Balances;
     type BurnAccount = BurnAccount;
+}
+
+impl<C> frame_system::offchain::SendTransactionTypes<C> for Runtime
+where
+    RuntimeCall: From<C>,
+{
+    type Extrinsic = UncheckedExtrinsic;
+    type OverarchingCall = RuntimeCall;
 }
 
 impl pallet_oracle::Config for Runtime {
@@ -404,6 +418,12 @@ impl pallet_governance::Config for Runtime {
     type TreasuryAccount = TreasuryAccount;
 }
 
+impl pallet_bridge::Config for Runtime {
+    type RuntimeEvent = RuntimeEvent;
+    type MaxRelayers = MaxRelayers;
+    type MaxConfirmationsPerDeposit = MaxConfirmationsPerDeposit;
+}
+
 // ---------------------------------------------------------------------------
 // Construct Runtime
 // ---------------------------------------------------------------------------
@@ -425,7 +445,8 @@ construct_runtime!(
         Mining: pallet_mining::{Pallet, Call, Storage, Event<T>, ValidateUnsigned},
         Carbon: pallet_carbon,
         TwlToken: pallet_twl_token,
-        Oracle: pallet_oracle,
+        Oracle: pallet_oracle::{Pallet, Call, Storage, Event<T>, ValidateUnsigned},
+        Bridge: pallet_bridge::{Pallet, Call, Storage, Event<T>, Config<T>},
 
         // Governance
         Governance: pallet_governance,

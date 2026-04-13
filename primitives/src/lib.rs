@@ -160,8 +160,8 @@ impl RailKind {
     }
 
     /// The oracle pair used to price this rail's asset against TWL.
-    /// Returns None for TwillInternal (no external price needed) and
-    /// fiat rails (no oracle pair until governance activates them).
+    /// Returns None for TwillInternal only (no external price needed — TWL is native).
+    /// All external rails (crypto, carbon, fiat) require a live oracle price.
     pub fn oracle_pair(&self) -> Option<AssetPair> {
         match self {
             Self::Bitcoin => Some(AssetPair::BtcTwl),
@@ -169,7 +169,9 @@ impl RailKind {
             Self::Solana => Some(AssetPair::SolTwl),
             Self::Verra | Self::GoldStandard => Some(AssetPair::CarbonTwl),
             Self::TwillInternal => None,
-            Self::Sepa | Self::Ach | Self::Swift | Self::Upi | Self::Faster => None,
+            // Fiat rails: EUR for SEPA, USD for everything else
+            Self::Sepa => Some(AssetPair::EurTwl),
+            Self::Ach | Self::Swift | Self::Upi | Self::Faster => Some(AssetPair::UsdTwl),
         }
     }
 }
@@ -371,20 +373,20 @@ pub trait MiningInterface<AccountId> {
     /// Record that a validator processed a settlement (for activity tracking / slashing)
     fn record_validator_activity(validator: &AccountId);
 
-    /// Accumulate settlement fees for distribution to validators
-    fn accumulate_fee(amount: u128);
-
     /// Set the treasury share of block rewards (in BPS). Capped at MINING_TREASURY_SHARE_MAX_BPS.
     /// Called by governance on proposal enactment.
     fn set_treasury_mining_share(bps: u16);
+
+    /// Return total TWL minted so far. Used by governance for voting phase transitions.
+    fn total_minted() -> u128;
 }
 
 /// No-op implementation for testing or when mining is disabled
 impl<AccountId> MiningInterface<AccountId> for () {
     fn update_settlement_root(_: H256) {}
     fn record_validator_activity(_: &AccountId) {}
-    fn accumulate_fee(_: u128) {}
     fn set_treasury_mining_share(_: u16) {}
+    fn total_minted() -> u128 { 0 }
 }
 
 /// Validator status check — used by oracle pallet to verify
@@ -454,6 +456,10 @@ pub enum AssetPair {
     EthTwl,
     SolTwl,
     CarbonTwl,
+    /// USD/TWL — used by ACH, SWIFT, UPI, Faster Payments fiat rails
+    UsdTwl,
+    /// EUR/TWL — used by SEPA fiat rail
+    EurTwl,
 }
 
 /// Oracle interface — called by reserve and settlement pallets
@@ -476,6 +482,19 @@ impl OracleInterface for () {
     fn get_price(_: AssetPair) -> Option<u128> { None }
     fn is_stale(_: AssetPair) -> bool { true }
     fn record_settlement_price(_: AssetPair, _: u128) {}
+}
+
+/// Bridge interface — called by settlement pallet to verify off-chain deposits
+/// before executing BTC/ETH/SOL legs.
+pub trait BridgeInterface {
+    /// Returns true if an off-chain deposit for this exchange_id has been
+    /// confirmed by enough relayers.
+    fn is_deposit_confirmed(exchange_id: H256) -> bool;
+}
+
+/// No-op bridge (used in tests or when bridge pallet is absent)
+impl BridgeInterface for () {
+    fn is_deposit_confirmed(_: H256) -> bool { false }
 }
 
 // ---------------------------------------------------------------------------

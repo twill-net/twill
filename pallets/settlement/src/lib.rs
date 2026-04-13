@@ -83,10 +83,13 @@ pub mod pallet {
         /// Oracle integration — price gate and settlement-price ledger
         type OracleProvider: twill_primitives::OracleInterface;
 
+        /// Bridge pallet integration — confirms off-chain BTC/ETH/SOL deposits
+        /// before any external-chain debit leg can execute.
+        type BridgeProvider: twill_primitives::BridgeInterface;
+
         /// Maximum settlements that can auto-expire per block
         #[pallet::constant]
         type MaxExpiryPerBlock: Get<u32>;
-
     }
 
     // -----------------------------------------------------------------------
@@ -275,6 +278,12 @@ pub mod pallet {
         /// Every external asset must have a live oracle price before settlement
         /// can execute. Submit oracle prices first, then retry.
         OraclePriceUnavailable,
+        /// Every settlement must include at least one TwillInternal leg.
+        /// This ensures fee collection and price discovery on every swap.
+        TwlLegRequired,
+        /// BTC/ETH/SOL debit leg requires bridge relayer confirmation before settlement.
+        /// Bridge relayers must call confirm_deposit until threshold is reached.
+        BridgeConfirmationRequired,
     }
 
     // -----------------------------------------------------------------------
@@ -521,6 +530,19 @@ pub mod pallet {
             }
 
             // ---------------------------------------------------------------
+            // Pass 1.1: Enforce mandatory TWL leg
+            // Every settlement must route through at least one TwillInternal
+            // leg. This guarantees fee collection and price oracle signal on
+            // every swap. Direct non-TWL swaps (e.g. BTC↔Carbon) require
+            // a TWL leg on both sides as the pricing bridge.
+            // ---------------------------------------------------------------
+
+            ensure!(
+                legs_info.iter().any(|l| l.rail == RailKind::TwillInternal),
+                Error::<T>::TwlLegRequired
+            );
+
+            // ---------------------------------------------------------------
             // Pass 1.5: Oracle price gate
             // Every non-TWL rail must have a live oracle price before this
             // settlement can execute. This enforces that every asset flowing
@@ -549,6 +571,9 @@ pub mod pallet {
                             AssetPair::EthTwl    => eth_debit    = eth_debit.saturating_add(amt),
                             AssetPair::SolTwl    => sol_debit    = sol_debit.saturating_add(amt),
                             AssetPair::CarbonTwl => carbon_debit = carbon_debit.saturating_add(amt),
+                            // Fiat rails (USD/EUR) recorded for completeness; settlement
+                            // price feedback not yet wired for fiat (no on-chain counterpart)
+                            AssetPair::UsdTwl | AssetPair::EurTwl => {},
                         }
                     },
                     None => {
@@ -556,6 +581,27 @@ pub mod pallet {
                         // activation and oracle node infrastructure before use.
                         return Err(Error::<T>::OraclePriceUnavailable.into());
                     },
+                }
+            }
+
+            // ---------------------------------------------------------------
+            // Pass 1.6: Bridge confirmation gate
+            // BTC/ETH/SOL debit legs require N-of-M relayer confirmation that
+            // the deposit has been received on the external chain. Carbon and
+            // fiat legs have on-chain or oracle confirmation respectively.
+            // TwillInternal legs need no external confirmation (on-chain).
+            // ---------------------------------------------------------------
+
+            for leg in legs_info.iter() {
+                if leg.side != LegSide::Debit { continue; }
+                match leg.rail {
+                    RailKind::Bitcoin | RailKind::Ethereum | RailKind::Solana => {
+                        ensure!(
+                            T::BridgeProvider::is_deposit_confirmed(exchange_id),
+                            Error::<T>::BridgeConfirmationRequired
+                        );
+                    },
+                    _ => {} // Other rails confirmed by on-chain state or oracle
                 }
             }
 
@@ -637,12 +683,14 @@ pub mod pallet {
                     if let Some(fee_payer) = currency_debits.first() {
                         // AllowDeath: the debit participant locked these funds for settlement;
                         // draining their account to zero is intentional and correct.
-                        let _ = T::Currency::transfer(
+                        // Hard fail: if fee transfer fails, the entire settlement fails.
+                        // Fees flow directly into FeePoolAccount balance — no counter to drift.
+                        T::Currency::transfer(
                             &fee_payer.participant,
                             &T::FeePoolAccount::get(),
                             currency_fee,
                             ExistenceRequirement::AllowDeath,
-                        );
+                        )?;
                     }
                 }
 
@@ -759,12 +807,9 @@ pub mod pallet {
             T::MiningProvider::update_settlement_root(merkle_root);
             T::MiningProvider::record_validator_activity(&settler);
 
-            // Fee distribution: 100% to PoSe stakers.
-            // Tokens already sit in FeePoolAccount; mining pallet drains it each block.
-            if !fee.is_zero() {
-                let fee_u128: u128 = fee.try_into().unwrap_or(0u128);
-                T::MiningProvider::accumulate_fee(fee_u128);
-            }
+            // Fee already sits in FeePoolAccount from the transfer above.
+            // Mining pallet reads actual FeePoolAccount balance each block
+            // and distributes 80/20 to stakers/treasury. No counter needed.
 
             // Record external asset deposits into reserve vault
             for leg in legs_info.iter() {

@@ -34,7 +34,7 @@ pub mod pallet {
     use frame_support::{
         dispatch::{Pays, PostDispatchInfo},
         pallet_prelude::*,
-        traits::{Currency, ExistenceRequirement, Get, ReservableCurrency},
+        traits::{Currency, ExistenceRequirement, Get, ReservableCurrency, UnixTime},
     };
     use frame_system::pallet_prelude::*;
     use sp_core::H256;
@@ -66,6 +66,10 @@ pub mod pallet {
         /// a governance-voted share of block rewards. Spendable only via passed proposals.
         #[pallet::constant]
         type TreasuryAccount: Get<Self::AccountId>;
+
+        /// Unix timestamp provider for difficulty adjustment wall-clock timing.
+        /// Wire to `pallet_timestamp::Pallet<Runtime>` in the runtime.
+        type UnixTime: UnixTime;
     }
 
     // -----------------------------------------------------------------------
@@ -100,9 +104,9 @@ pub mod pallet {
     pub type DifficultyAdjustmentBlock<T: Config> = StorageValue<_, BlockNumberFor<T>, ValueQuery>;
     #[pallet::storage]
     pub type EpochStartTimestamp<T: Config> = StorageValue<_, u64, ValueQuery>;
-    /// Settlement fees accumulated for distribution to stakers
+    /// Wall-clock timestamp (ms) at the start of the current difficulty period.
     #[pallet::storage]
-    pub type PendingFeePool<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
+    pub type AdjustmentStartMs<T: Config> = StorageValue<_, u64, ValueQuery>;
     /// Governance-adjustable share of block rewards redirected to the treasury (in BPS).
     /// Default: 0 (miners keep 100%). Max: MINING_TREASURY_SHARE_MAX_BPS (10%).
     /// Set via SetMiningTreasuryShare governance proposal.
@@ -183,6 +187,22 @@ pub mod pallet {
             if !GenesisInitialized::<T>::get() {
                 GenesisBlock::<T>::put(now);
                 DifficultyAdjustmentBlock::<T>::put(now);
+
+                // Non-trivial genesis settlement root — SHA256("twill_genesis_settlement_root_v1")
+                // Miners must use this value as their initial settlement_root.
+                // H256::zero() is explicitly rejected to prevent trivial proof gaming.
+                let genesis_root = {
+                    use sha2::{Digest, Sha256};
+                    let mut h = Sha256::new();
+                    h.update(b"twill_genesis_settlement_root_v1");
+                    H256::from_slice(&h.finalize())
+                };
+                CurrentSettlementRoot::<T>::put(genesis_root);
+
+                // Record wall-clock baseline for the first difficulty period
+                let now_ms = T::UnixTime::now().as_millis() as u64;
+                AdjustmentStartMs::<T>::put(now_ms);
+
                 GenesisInitialized::<T>::put(true);
             }
 
@@ -199,7 +219,14 @@ pub mod pallet {
                 });
             }
 
-            Weight::from_parts(10_000_000, 0)
+            // Difficulty adjustment — fires every DIFFICULTY_ADJUSTMENT_INTERVAL blocks
+            let adj_block = DifficultyAdjustmentBlock::<T>::get();
+            let blocks_since_adj: u64 = now.saturating_sub(adj_block).try_into().unwrap_or(0u64);
+            if blocks_since_adj >= DIFFICULTY_ADJUSTMENT_INTERVAL {
+                Self::adjust_difficulty(now);
+            }
+
+            Weight::from_parts(15_000_000, 0)
         }
 
         fn on_finalize(now: BlockNumberFor<T>) {
@@ -462,17 +489,15 @@ pub mod pallet {
             LastActiveBlock::<T>::insert(validator, now);
         }
 
-        /// Accumulate settlement fees for distribution to stakers.
-        fn accumulate_fee(amount: u128) {
-            let balance: BalanceOf<T> = amount
-                .try_into().unwrap_or_else(|_| BalanceOf::<T>::max_value());
-            PendingFeePool::<T>::mutate(|pool| { *pool = pool.saturating_add(balance); });
-        }
-
         /// Set the treasury share of block rewards. Called by governance on enactment.
         fn set_treasury_mining_share(bps: u16) {
             let capped = bps.min(twill_primitives::MINING_TREASURY_SHARE_MAX_BPS);
             MiningTreasuryShareBps::<T>::put(capped);
+        }
+
+        /// Total TWL minted from the mining pool so far.
+        fn total_minted() -> u128 {
+            TotalMinted::<T>::get()
         }
     }
 
@@ -498,22 +523,26 @@ pub mod pallet {
         /// only when there are active validators; otherwise it remains in the fee pool.
         fn auto_distribute_staking(now: BlockNumberFor<T>) {
             let validators = ActiveValidatorSet::<T>::get();
-            let pending_fees = PendingFeePool::<T>::get();
+            let fee_pool = T::FeePoolAccount::get();
 
-            if pending_fees.is_zero() {
+            // Read actual balance — no separate counter that can drift
+            let pool_balance = T::Currency::free_balance(&fee_pool);
+            if pool_balance.is_zero() {
                 return;
             }
 
-            let fee_u128: u128 = pending_fees.try_into().unwrap_or(0u128);
+            let fee_u128: u128 = pool_balance.try_into().unwrap_or(0u128);
 
-            // Always send 20% to community pool
-            let community_share = fee_u128.saturating_mul(twill_primitives::FEE_COMMUNITY_SHARE_BPS as u128) / 10_000u128;
+            // Always send 20% to treasury
+            let community_share = fee_u128
+                .saturating_mul(twill_primitives::FEE_COMMUNITY_SHARE_BPS as u128) / 10_000u128;
             let staker_share = fee_u128.saturating_sub(community_share);
 
             if community_share > 0 {
-                let community_amount: BalanceOf<T> = community_share.try_into().unwrap_or_else(|_| BalanceOf::<T>::zero());
+                let community_amount: BalanceOf<T> = community_share
+                    .try_into().unwrap_or_else(|_| BalanceOf::<T>::zero());
                 let _ = T::Currency::transfer(
-                    &T::FeePoolAccount::get(),
+                    &fee_pool,
                     &T::TreasuryAccount::get(),
                     community_amount,
                     ExistenceRequirement::KeepAlive,
@@ -523,19 +552,14 @@ pub mod pallet {
             // Distribute 80% to stakers if any are active
             if !validators.is_empty() && staker_share > 0 {
                 Self::distribute_stake_weighted(&validators, staker_share);
-                PendingFeePool::<T>::put(BalanceOf::<T>::zero());
-
-                let total: BalanceOf<T> = pending_fees;
                 Self::deposit_event(Event::FeesDistributed {
-                    fee_reward: total,
+                    fee_reward: pool_balance,
                     staker_count: validators.len() as u32,
                     block_number: now,
                 });
-            } else if validators.is_empty() {
-                // No stakers — community portion already transferred, clear only that amount
-                let community_amount: BalanceOf<T> = community_share.try_into().unwrap_or_else(|_| BalanceOf::<T>::zero());
-                PendingFeePool::<T>::mutate(|p| *p = p.saturating_sub(community_amount));
             }
+            // If no stakers: community share already transferred; staker share remains
+            // in FeePoolAccount until stakers join. No explicit reset needed.
         }
 
         /// Distribute settlement fees to stakers proportional to stake.
@@ -621,6 +645,66 @@ pub mod pallet {
             if !to_remove.is_empty() {
                 ActiveValidatorSet::<T>::mutate(|set| { set.retain(|v| !to_remove.contains(v)); });
             }
+        }
+
+        /// Bitcoin-style difficulty retarget — fires every DIFFICULTY_ADJUSTMENT_INTERVAL blocks.
+        /// Compares actual wall-clock time against expected time and scales the target accordingly.
+        /// Clamped to [expected/4, expected*4] (same as Bitcoin). Works on upper 16 bytes of H256.
+        fn adjust_difficulty(now: BlockNumberFor<T>) {
+            let old_difficulty = PocDifficulty::<T>::get()
+                .unwrap_or_else(|| H256::from(INITIAL_DIFFICULTY));
+
+            let now_ms = T::UnixTime::now().as_millis() as u64;
+            let start_ms = AdjustmentStartMs::<T>::get();
+
+            if start_ms == 0 || now_ms <= start_ms {
+                // No valid baseline yet — just reset the clock
+                AdjustmentStartMs::<T>::put(now_ms);
+                DifficultyAdjustmentBlock::<T>::put(now);
+                return;
+            }
+
+            let actual_ms = now_ms.saturating_sub(start_ms);
+            let expected_ms = DIFFICULTY_ADJUSTMENT_INTERVAL
+                .saturating_mul(twill_primitives::BLOCK_TIME_MS);
+
+            // Clamp to [expected/4, expected*4]
+            let clamped_ms = actual_ms.max(expected_ms / 4).min(expected_ms * 4);
+
+            // Work in u128 using the upper 16 bytes (big-endian) of H256
+            let old_bytes: [u8; 16] = old_difficulty.as_bytes()[..16]
+                .try_into().unwrap_or([0xFF; 16]);
+            let old_u128 = u128::from_be_bytes(old_bytes);
+
+            // new_target = old_target * actual_time / expected_time
+            // Larger target = easier; smaller target = harder
+            let new_u128 = (old_u128 as u128)
+                .saturating_mul(clamped_ms as u128)
+                .checked_div(expected_ms as u128)
+                .unwrap_or(old_u128);
+
+            let initial_bytes: [u8; 16] = INITIAL_DIFFICULTY[..16]
+                .try_into().unwrap_or([0xFF; 16]);
+            let initial_u128 = u128::from_be_bytes(initial_bytes);
+
+            // Clamp: cannot be easier than genesis target, cannot be zero
+            let new_u128 = new_u128.max(1).min(initial_u128);
+
+            let mut new_bytes = [0u8; 32];
+            new_bytes[..16].copy_from_slice(&new_u128.to_be_bytes());
+            // Lower 16 bytes = 0xFF — they don't constrain the comparison
+            new_bytes[16..].copy_from_slice(&[0xFF; 16]);
+            let new_difficulty = H256::from(new_bytes);
+
+            PocDifficulty::<T>::put(new_difficulty);
+            DifficultyAdjustmentBlock::<T>::put(now);
+            AdjustmentStartMs::<T>::put(now_ms);
+
+            Self::deposit_event(Event::DifficultyAdjusted {
+                old_difficulty,
+                new_difficulty,
+                block_number: now,
+            });
         }
 
         fn compute_poc_hash(nonce: &H256, settlement_root: &H256, parent_hash: &[u8]) -> H256 {
