@@ -247,8 +247,8 @@ pub mod pallet {
         /// the hash proof, so mining the block simultaneously validates the
         /// settlement ledger. Block mined + ledger validated = 1 reward.
         ///
-        /// Bootstrap: first 10M TWL mined fee-free. After that, miners
-        /// pay a small transaction fee (by then they already have TWL).
+        /// Bootstrap: first 10M TWL mined fee-free (BOOTSTRAP_THRESHOLD).
+        /// After that, miners pay a small transaction fee (by then they already have TWL).
         #[pallet::call_index(0)]
         #[pallet::weight(Weight::from_parts(100_000_000, 0))]
         pub fn submit_poc_proof(
@@ -317,14 +317,17 @@ pub mod pallet {
         ///
         /// Staked TWL is the collateral that makes settlements trustworthy.
         /// Stakers earn settlement fees proportional to their stake.
-        /// Permissionless — just stake.
+        /// Permissionless — stake any amount >= MinPoseStake.
+        ///
+        /// Higher stake → proportionally more settlement fee earnings.
+        /// Stake is reserved (not spendable) until deregistration.
         #[pallet::call_index(1)]
         #[pallet::weight(Weight::from_parts(50_000_000, 0))]
-        pub fn register_validator(origin: OriginFor<T>) -> DispatchResult {
+        pub fn register_validator(origin: OriginFor<T>, stake: BalanceOf<T>) -> DispatchResult {
             let who = ensure_signed(origin)?;
             ensure!(!PoseValidators::<T>::contains_key(&who), Error::<T>::AlreadyRegistered);
+            ensure!(stake >= T::MinPoseStake::get(), Error::<T>::InsufficientStake);
 
-            let stake = T::MinPoseStake::get();
             T::Currency::reserve(&who, stake).map_err(|_| Error::<T>::InsufficientStake)?;
 
             let now = frame_system::Pallet::<T>::block_number();
@@ -360,8 +363,8 @@ pub mod pallet {
 
         /// Bootstrap mining: unsigned proof submission during bootstrap period.
         ///
-        /// During bootstrap (TotalMinted < 10M TWL), miners submit proofs
-        /// without paying fees. The PoW proof itself is the spam protection —
+        /// During bootstrap (TotalMinted < BOOTSTRAP_THRESHOLD = 10M TWL), miners submit
+        /// proofs without paying fees. The PoW proof itself is the spam protection —
         /// invalid proofs are rejected at the transaction pool level.
         /// After 10M TWL mined, miners must use submit_poc_proof (signed, with fee).
         #[pallet::call_index(3)]

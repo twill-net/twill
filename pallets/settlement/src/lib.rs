@@ -54,9 +54,16 @@ pub mod pallet {
         #[pallet::constant]
         type MaxPayloadSize: Get<u32>;
 
-        /// Settlement timeout in blocks
+        /// Minimum settlement timeout in blocks (~2 minutes). On-chain-only settlements
+        /// (TWL↔Carbon) can use this directly — everything resolves in seconds.
         #[pallet::constant]
         type SettlementTimeout: Get<BlockNumberFor<Self>>;
+
+        /// Maximum settlement timeout in blocks (default 14400 = 24 hours).
+        /// BTC or ETH legs require bridge relayer confirmation — those chains need time.
+        /// Proposer chooses any value in [SettlementTimeout, MaxSettlementTimeout].
+        #[pallet::constant]
+        type MaxSettlementTimeout: Get<BlockNumberFor<Self>>;
 
         /// Fee basis points (10 = 0.10%)
         #[pallet::constant]
@@ -328,12 +335,19 @@ pub mod pallet {
     #[pallet::call]
     impl<T: Config> Pallet<T> {
         /// Propose a new atomic settlement.
+        ///
+        /// `timeout_blocks` — how long until the settlement expires and auto-refunds.
+        /// Clamped to [SettlementTimeout, MaxSettlementTimeout].
+        ///
+        /// On-chain-only swaps (TWL↔Carbon): use the minimum (default 20 blocks).
+        /// BTC/ETH swaps requiring bridge confirmation: use 600–14400 blocks (1h–24h).
         #[pallet::call_index(0)]
         #[pallet::weight(Weight::from_parts(50_000_000, 0))]
         pub fn propose(
             origin: OriginFor<T>,
             exchange_id: H256,
             hashlock: H256,
+            timeout_blocks: BlockNumberFor<T>,
         ) -> DispatchResult {
             let proposer = ensure_signed(origin)?;
 
@@ -343,7 +357,11 @@ pub mod pallet {
             );
 
             let now = frame_system::Pallet::<T>::block_number();
-            let timelock_block = now.saturating_add(T::SettlementTimeout::get());
+            // Clamp to [min, max] — prevents both dust timeouts and unbounded locks
+            let min_timeout = T::SettlementTimeout::get();
+            let max_timeout = T::MaxSettlementTimeout::get();
+            let clamped = timeout_blocks.max(min_timeout).min(max_timeout);
+            let timelock_block = now.saturating_add(clamped);
 
             let settlement = Settlement {
                 exchange_id,

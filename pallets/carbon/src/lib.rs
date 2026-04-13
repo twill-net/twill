@@ -302,6 +302,7 @@ pub mod pallet {
         }
 
         /// Transfer carbon credits.
+        /// Accepts both Issued (pre-bond-claim) and Active (post-dispute-window) credits.
         #[pallet::call_index(4)]
         #[pallet::weight(Weight::from_parts(25_000_000, 0))]
         pub fn transfer(origin: OriginFor<T>, credit_id: H256, to: T::AccountId) -> DispatchResult {
@@ -309,7 +310,10 @@ pub mod pallet {
             Credits::<T>::try_mutate(credit_id, |opt| -> DispatchResult {
                 let credit = opt.as_mut().ok_or(Error::<T>::CreditNotFound)?;
                 ensure!(credit.owner == from, Error::<T>::NotOwner);
-                ensure!(credit.status == CarbonStatus::Issued, Error::<T>::InvalidCreditStatus);
+                ensure!(
+                    credit.status == CarbonStatus::Issued || credit.status == CarbonStatus::Active,
+                    Error::<T>::InvalidCreditStatus
+                );
                 let amount = credit.amount;
                 AccountCredits::<T>::mutate(&from, |b| *b = b.saturating_sub(amount));
                 AccountCredits::<T>::mutate(&to, |b| *b = b.saturating_add(amount));
@@ -463,13 +467,23 @@ pub mod pallet {
             }).is_ok()
         }
 
-        /// Restore a locked carbon credit to Issued on refund or expiry.
+        /// Restore a locked carbon credit to its pre-lock status on refund or expiry.
+        ///
+        /// If the issuance bond has already been claimed (`IssuanceBonds` entry gone),
+        /// the credit was `Active` before locking → restore to `Active`.
+        /// If the bond is still pending, the credit was `Issued` → restore to `Issued`.
         fn unlock_refund(credit_id: sp_core::H256) -> bool {
             Credits::<T>::try_mutate(credit_id, |opt| -> Result<(), ()> {
                 let credit = opt.as_mut().ok_or(())?;
                 if credit.status != CarbonStatus::Locked { return Err(()); }
                 let amount = credit.amount;
-                credit.status = CarbonStatus::Issued;
+                // Restore to Active if bond was already claimed, Issued if bond still pending
+                let restore_status = if IssuanceBonds::<T>::contains_key(credit_id) {
+                    CarbonStatus::Issued
+                } else {
+                    CarbonStatus::Active
+                };
+                credit.status = restore_status;
                 TotalLocked::<T>::mutate(|t| *t = t.saturating_sub(amount));
                 Ok(())
             }).is_ok()

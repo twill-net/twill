@@ -101,7 +101,16 @@ pub mod pallet {
     #[derive(Clone, PartialEqNoBound, EqNoBound, Encode, Decode, RuntimeDebugNoBound, TypeInfo, MaxEncodedLen)]
     #[scale_info(skip_type_params(T))]
     pub enum ProposalKind<T: Config> {
-        /// Runtime upgrade — new WASM blob (submitted as hash, code stored off-chain)
+        /// Runtime upgrade — new WASM blob.
+        ///
+        /// On enactment, the code_hash is stored as the authorized upgrade hash.
+        /// Then anyone calls `apply_upgrade(wasm_code)` to apply it.
+        /// The code_hash must be `blake2_256(wasm_code)` — the standard Substrate hash.
+        ///
+        /// Two-step process for EVM activation:
+        /// (1) ActivateEvm proposal sets the EvmEnabled flag.
+        /// (2) RuntimeUpgrade proposal applies a Frontier-enabled WASM build.
+        /// Both must pass. EVM is live only after the upgrade is applied.
         RuntimeUpgrade { code_hash: sp_core::H256 },
         /// Board recall — emergency removal of a board member
         BoardRecall { member: T::AccountId },
@@ -115,7 +124,7 @@ pub mod pallet {
         SetBoardPay { amount_per_block: BalanceOf<T> },
         /// Activate EVM — enables Ethereum-compatible smart contract execution via Frontier.
         /// This is a two-step process: (1) this proposal passes and sets EvmEnabled = true,
-        /// (2) the board submits a RuntimeUpgrade proposal with a Frontier-enabled WASM build.
+        /// (2) a RuntimeUpgrade proposal applies the Frontier-enabled WASM build.
         /// The community votes on both. EVM is live only after both proposals are enacted.
         /// Once activated, any Solidity contract deployable on Ethereum deploys on Twill unchanged.
         ActivateEvm,
@@ -125,6 +134,10 @@ pub mod pallet {
         /// Adjust the maximum vote weight per address in TwlWeighted phase (in planck).
         /// Prevents whales from capturing governance. Default: 100,000 TWL.
         SetMaxVoteWeight { twl_amount: u128 },
+        /// Spend from the treasury — transfer `amount` to `beneficiary`.
+        /// Use for protocol development, integrations, security audits, or grants.
+        /// Standard quorum + majority required (same as all other proposals).
+        TreasurySpend { beneficiary: T::AccountId, amount: BalanceOf<T> },
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, Encode, Decode, RuntimeDebug, TypeInfo, MaxEncodedLen)]
@@ -237,6 +250,14 @@ pub mod pallet {
     #[pallet::storage]
     pub type EvmEnabled<T: Config> = StorageValue<_, bool, ValueQuery>;
 
+    /// Authorized runtime upgrade hash.
+    /// Set when a RuntimeUpgrade proposal is enacted (governance approved the hash).
+    /// Cleared when `apply_upgrade(code)` is successfully called with matching code.
+    /// Only one upgrade can be authorized at a time — subsequent RuntimeUpgrade proposals
+    /// overwrite the previous authorization if it hasn't been applied yet.
+    #[pallet::storage]
+    pub type ApprovedUpgrade<T: Config> = StorageValue<_, sp_core::H256, OptionQuery>;
+
     /// Block when current election started
     #[pallet::storage]
     pub type ElectionStartBlock<T: Config> = StorageValue<_, BlockNumberFor<T>, ValueQuery>;
@@ -289,6 +310,15 @@ pub mod pallet {
         VotingPhaseSwitched { new_phase: VotingPhase, block_number: BlockNumberFor<T> },
         /// MaxVoteWeight updated by governance
         MaxVoteWeightUpdated { new_limit_planck: u128 },
+        /// RuntimeUpgrade proposal enacted — code_hash is now the authorized upgrade.
+        /// Call `apply_upgrade(wasm_code)` with code whose blake2_256 == code_hash.
+        UpgradeAuthorized { code_hash: sp_core::H256 },
+        /// Runtime upgrade applied — new WASM is live from the next block.
+        UpgradeApplied { code_hash: sp_core::H256 },
+        /// Treasury spend enacted — funds transferred to beneficiary.
+        TreasurySpendEnacted { beneficiary: T::AccountId, amount: BalanceOf<T> },
+        /// Treasury spend skipped — treasury balance insufficient.
+        TreasurySpendSkipped { beneficiary: T::AccountId, amount: BalanceOf<T> },
     }
 
     #[pallet::error]
@@ -305,6 +335,13 @@ pub mod pallet {
         ElectionAlreadyActive,
         NoNominees,
         NotANominee,
+        /// Board term has not yet expired — election cannot start yet.
+        BoardTermNotExpired,
+        /// No runtime upgrade has been authorized by governance yet.
+        NoApprovedUpgrade,
+        /// Submitted WASM code does not match the authorized upgrade hash.
+        /// Compute blake2_256(wasm_code) and ensure it matches the authorized hash.
+        UpgradeHashMismatch,
     }
 
     // -----------------------------------------------------------------------
@@ -508,6 +545,74 @@ pub mod pallet {
 
             Ok(())
         }
+
+        /// Start a board election. Permissionless — anyone can call this.
+        ///
+        /// First election (board not yet seated): callable immediately, no deposit, no conditions.
+        /// This bootstraps the governance system from genesis.
+        ///
+        /// Renewal election (board already seated): callable only after the term has expired.
+        /// The auto-trigger in on_initialize handles the normal case; this is a manual fallback.
+        #[pallet::call_index(4)]
+        #[pallet::weight(Weight::from_parts(20_000_000, 0))]
+        pub fn start_election(origin: OriginFor<T>) -> DispatchResult {
+            ensure_signed(origin)?;
+            ensure!(!ElectionActive::<T>::get(), Error::<T>::ElectionAlreadyActive);
+
+            let now = frame_system::Pallet::<T>::block_number();
+
+            // If board is seated, verify term has expired before allowing a new election
+            if BoardSeated::<T>::get() {
+                let term_start = BoardTermStart::<T>::get();
+                ensure!(
+                    now.saturating_sub(term_start) >= T::BoardTermBlocks::get(),
+                    Error::<T>::BoardTermNotExpired
+                );
+            }
+            // Board not seated: first election, no restrictions
+
+            ElectionActive::<T>::put(true);
+            ElectionStartBlock::<T>::put(now);
+            Self::deposit_event(Event::ElectionStarted { block_number: now });
+            Ok(())
+        }
+
+        /// Apply an authorized runtime upgrade.
+        ///
+        /// Once a RuntimeUpgrade proposal passes, the code_hash is stored on-chain.
+        /// Anyone may then call this with the full WASM binary. The blake2_256 hash
+        /// of the submitted code must match the authorized hash.
+        ///
+        /// On success, the new runtime takes effect from the next block.
+        ///
+        /// This is an Operational dispatch — it may exceed normal block weight limits
+        /// since WASM binaries are large (typically 1–3 MiB).
+        #[pallet::call_index(5)]
+        #[pallet::weight((
+            frame_support::weights::Weight::from_parts(500_000_000, 0),
+            frame_support::dispatch::DispatchClass::Operational
+        ))]
+        pub fn apply_upgrade(origin: OriginFor<T>, code: sp_std::vec::Vec<u8>) -> DispatchResult {
+            ensure_signed(origin)?;
+
+            let approved = ApprovedUpgrade::<T>::get().ok_or(Error::<T>::NoApprovedUpgrade)?;
+
+            // Verify code matches the governance-approved hash
+            let actual_hash = sp_core::H256::from(sp_core::hashing::blake2_256(&code));
+            ensure!(actual_hash == approved, Error::<T>::UpgradeHashMismatch);
+
+            // Clear the authorization — one-time use
+            ApprovedUpgrade::<T>::kill();
+
+            // Apply the upgrade — new runtime active from next block.
+            // set_code returns DispatchResultWithPostInfo; extract the DispatchError.
+            let root_origin: T::RuntimeOrigin = frame_system::RawOrigin::Root.into();
+            frame_system::Pallet::<T>::set_code(root_origin, code)
+                .map_err(|e| e.error)?;
+
+            Self::deposit_event(Event::UpgradeApplied { code_hash: approved });
+            Ok(())
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -643,6 +748,34 @@ pub mod pallet {
                         Self::deposit_event(Event::MaxVoteWeightUpdated {
                             new_limit_planck: twl_amount,
                         });
+                        proposal.status = ProposalStatus::Enacted;
+                    }
+
+                    // Runtime upgrade — authorize the code hash.
+                    // Anyone may then call apply_upgrade(wasm_code) to apply the new runtime.
+                    if let ProposalKind::RuntimeUpgrade { code_hash } = proposal.kind {
+                        ApprovedUpgrade::<T>::put(code_hash);
+                        Self::deposit_event(Event::UpgradeAuthorized { code_hash });
+                        proposal.status = ProposalStatus::Enacted;
+                    }
+
+                    // Treasury spend — transfer funds to beneficiary if treasury has enough.
+                    if let ProposalKind::TreasurySpend { ref beneficiary, amount } = proposal.kind {
+                        let beneficiary = beneficiary.clone();
+                        let treasury = T::TreasuryAccount::get();
+                        let available = T::Currency::free_balance(&treasury);
+                        let min_balance = T::Currency::minimum_balance();
+                        if available >= amount.saturating_add(min_balance) {
+                            let _ = T::Currency::transfer(
+                                &treasury,
+                                &beneficiary,
+                                amount,
+                                ExistenceRequirement::KeepAlive,
+                            );
+                            Self::deposit_event(Event::TreasurySpendEnacted { beneficiary, amount });
+                        } else {
+                            Self::deposit_event(Event::TreasurySpendSkipped { beneficiary, amount });
+                        }
                         proposal.status = ProposalStatus::Enacted;
                     }
                 } else {

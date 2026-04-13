@@ -121,7 +121,7 @@ pub const VERSION: sp_version::RuntimeVersion = sp_version::RuntimeVersion {
     spec_name: create_runtime_str!("twill"),
     impl_name: create_runtime_str!("twill-node"),
     authoring_version: 1,
-    spec_version: 102,
+    spec_version: 103,
     impl_version: 1,
     apis: RUNTIME_API_VERSIONS,
     transaction_version: 1,
@@ -182,6 +182,7 @@ parameter_types! {
     pub const MaxLegsPerSettlement: u32 = 10;
     pub const MaxPayloadSize: u32 = 1024; // 1 KiB per leg payload
     pub const SettlementTimeout: BlockNumber = SETTLEMENT_TIMEOUT_BLOCKS;
+    pub const MaxSettlementTimeout: BlockNumber = MAX_SETTLEMENT_TIMEOUT_BLOCKS;
     pub const FeeBps: u16 = SETTLEMENT_FEE_BPS;
     pub const MinFee: Balance = TWILL / 10; // 0.1 TWL minimum fee
     pub const MaxExpiryPerBlock: u32 = 50;
@@ -347,6 +348,7 @@ impl pallet_settlement::Config for Runtime {
     type MaxLegsPerSettlement = MaxLegsPerSettlement;
     type MaxPayloadSize = MaxPayloadSize;
     type SettlementTimeout = SettlementTimeout;
+    type MaxSettlementTimeout = MaxSettlementTimeout;
     type FeeBps = FeeBps;
     type MinFee = MinFee;
     type FeePoolAccount = FeePoolAccount;

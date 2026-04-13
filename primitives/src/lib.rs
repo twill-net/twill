@@ -47,8 +47,14 @@ pub const BLOCKS_PER_YEAR: u64 = 5_256_000;
 /// Halving interval in blocks (4 years)
 pub const HALVING_INTERVAL: u64 = BLOCKS_PER_YEAR * 4; // 21,024,000 blocks
 
-/// Settlement timeout in blocks (~2 minutes at 6s)
+/// Minimum settlement timeout in blocks (~2 minutes at 6s).
+/// On-chain-only settlements (TWL↔Carbon) use this directly.
 pub const SETTLEMENT_TIMEOUT_BLOCKS: u32 = 20;
+
+/// Maximum settlement timeout in blocks (24 hours at 6s blocks).
+/// BTC/ETH settlements that require bridge confirmation must use a long window.
+/// Proposer chooses any value in [SETTLEMENT_TIMEOUT_BLOCKS, MAX_SETTLEMENT_TIMEOUT_BLOCKS].
+pub const MAX_SETTLEMENT_TIMEOUT_BLOCKS: u32 = 14_400;
 
 // ---------------------------------------------------------------------------
 // Mining Constants
