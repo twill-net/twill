@@ -88,6 +88,7 @@ cargo test --all               # Run tests
 | [LAUNCH.md](docs/LAUNCH.md) | How to run a node |
 | [JOIN.md](JOIN.md) | How to start mining |
 | [COMMUNITY_BOARD_CHECKLIST.md](docs/COMMUNITY_BOARD_CHECKLIST.md) | Board mandate, audit requirements, corridor activation plan |
+| [FAILURE_MODES.md](docs/FAILURE_MODES.md) | Every known failure mode, protocol response, and board/community action required |
 
 ## Wallets
 

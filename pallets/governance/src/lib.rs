@@ -66,6 +66,11 @@ pub mod pallet {
         /// Maximum active proposals at once
         #[pallet::constant]
         type MaxActiveProposals: Get<u32>;
+
+        /// Treasury account — board pay is transferred from here each block.
+        /// No payment if treasury balance is insufficient (skips silently, no debt).
+        #[pallet::constant]
+        type TreasuryAccount: Get<Self::AccountId>;
     }
 
     // -----------------------------------------------------------------------
@@ -84,6 +89,9 @@ pub mod pallet {
         /// Set the share of block rewards redirected to the treasury (in BPS, max 1000 = 10%).
         /// Default at genesis is 0 — miners keep 100%. Community votes to activate.
         SetMiningTreasuryShare { bps: u16 },
+        /// Set board pay per block, paid from the treasury equally to all seated members.
+        /// Default at genesis is 0. If treasury has insufficient funds, payment skips silently.
+        SetBoardPay { amount_per_block: BalanceOf<T> },
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, Encode, Decode, RuntimeDebug, TypeInfo, MaxEncodedLen)]
@@ -143,6 +151,12 @@ pub mod pallet {
     /// All subsequent elections: normal TWL-weighted rules with NominationDeposit.
     #[pallet::storage]
     pub type ElectionCount<T: Config> = StorageValue<_, u32, ValueQuery>;
+
+    /// TWL paid per block from the treasury to each seated board member equally.
+    /// Default: 0 (unpaid at genesis). Community votes to set via SetBoardPay proposal.
+    /// Payment skips silently if treasury is insufficient — no debt, no halt.
+    #[pallet::storage]
+    pub type BoardPayPerBlock<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
 
     /// Active proposals
     #[pallet::storage]
@@ -213,6 +227,10 @@ pub mod pallet {
         NomineeRegistered { nominee: T::AccountId, deposit: BalanceOf<T> },
         /// Board election completed — new board seated
         BoardElected { members: sp_std::vec::Vec<T::AccountId>, term_start: BlockNumberFor<T> },
+        /// Board pay distributed this block (amount per member, number of members)
+        BoardPayDistributed { per_member: BalanceOf<T>, member_count: u32 },
+        /// Board pay skipped — treasury insufficient
+        BoardPaySkipped,
     }
 
     #[pallet::error]
@@ -257,6 +275,9 @@ pub mod pallet {
                     Self::finalize_election(now);
                 }
             }
+
+            // Distribute board pay from treasury (if set and board is seated)
+            Self::distribute_board_pay();
 
             // Check proposal voting periods
             Self::process_proposals(now);
@@ -408,6 +429,38 @@ pub mod pallet {
     // -----------------------------------------------------------------------
 
     impl<T: Config> Pallet<T> {
+        /// Distribute board pay from the treasury to each seated member equally.
+        /// Skips silently if: pay is 0, no board is seated, or treasury is insufficient.
+        /// Never mints new TWL — treasury-only source.
+        fn distribute_board_pay() {
+            let pay_per_block = BoardPayPerBlock::<T>::get();
+            if pay_per_block.is_zero() { return; }
+            if !BoardSeated::<T>::get() { return; }
+
+            let members = BoardMembers::<T>::get();
+            let count = members.len() as u32;
+            if count == 0 { return; }
+
+            // Integer division — dust stays in treasury
+            let per_member = pay_per_block / count.into();
+            if per_member.is_zero() { return; }
+
+            let treasury = T::TreasuryAccount::get();
+            for member in members.iter() {
+                if T::Currency::transfer(
+                    &treasury,
+                    member,
+                    per_member,
+                    frame_support::traits::ExistenceRequirement::KeepAlive,
+                ).is_err() {
+                    // Treasury insufficient — skip remaining payments this block
+                    Self::deposit_event(Event::BoardPaySkipped);
+                    return;
+                }
+            }
+            Self::deposit_event(Event::BoardPayDistributed { per_member, member_count: count });
+        }
+
         /// Process proposals whose voting periods have ended.
         /// Only iterates ActiveProposalIds — bounded, O(active) not O(all-time).
         fn process_proposals(now: BlockNumberFor<T>) {
@@ -454,6 +507,12 @@ pub mod pallet {
                     // Mining treasury share: take effect immediately on approval
                     if let ProposalKind::SetMiningTreasuryShare { bps } = proposal.kind {
                         T::MiningProvider::set_treasury_mining_share(bps);
+                        proposal.status = ProposalStatus::Enacted;
+                    }
+
+                    // Board pay: take effect immediately on approval
+                    if let ProposalKind::SetBoardPay { amount_per_block } = proposal.kind {
+                        BoardPayPerBlock::<T>::put(amount_per_block);
                         proposal.status = ProposalStatus::Enacted;
                     }
                 } else {

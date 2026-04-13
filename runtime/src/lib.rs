@@ -400,6 +400,7 @@ impl pallet_governance::Config for Runtime {
     type NominationDeposit = NominationDeposit;
     type MaxNominees = MaxNominees;
     type MaxActiveProposals = MaxActiveProposals;
+    type TreasuryAccount = TreasuryAccount;
 }
 
 // ---------------------------------------------------------------------------
