@@ -128,7 +128,7 @@ TWL occupies a new position in the digital asset taxonomy:
 
 TWL accrues value through three mechanisms:
 
-1. **Settlement fees.** Every atomic settlement on the Twill Network incurs a fee of 10 basis points (0.10%), denominated in TWL. As settlement volume grows, demand for TWL increases. 100% of fees flow to PoSe stakers. There is no treasury.
+1. **Settlement fees.** Every atomic settlement on the Twill Network incurs a fee of 10 basis points (0.10%), denominated in TWL. As settlement volume grows, demand for TWL increases. 80% of fees flow to PoSe stakers stake-weighted. 20% flows to the protocol treasury, spendable only via passed governance proposals.
 
 2. **Reserve accumulation.** Assets deposited into the network are held 1:1 in the Reserve Vault. As the reserve grows, the floor price of TWL rises monotonically.
 
@@ -419,12 +419,12 @@ fee = max(min_fee, twl_debit_volume * 0.001)
 
 The minimum fee is 0.1 TWL, preventing dust-value settlements from consuming network resources without compensation.
 
-Settlement fees are split automatically by the protocol every block:
+Settlement fees split automatically every block via protocol constants:
 
-- **PoSe Stakers (80%):** Distributed stake-weighted to all active stakers. This is the primary incentive for collateralizing settlement infrastructure.
-- **Treasury (20%):** Transferred to the keyless `SHA256("treasury")` account. Spendable only by a passed governance proposal. Accumulates from block one — even with zero stakers active. Community can also vote to redirect up to 10% of block rewards to the treasury (default: 0% at genesis).
+- **PoSe Stakers (80%, `FEE_STAKER_SHARE_BPS = 8000`):** Distributed stake-weighted to all active stakers. Primary incentive for collateralizing settlement infrastructure.
+- **Treasury (20%, `FEE_COMMUNITY_SHARE_BPS = 2000`):** Transferred to the keyless `SHA256("treasury")` account. Spendable only by a passed governance proposal. Accumulates from block one — even with zero stakers active. Community can also vote to redirect up to 10% of block rewards to the treasury (default: 0% at genesis).
 
-Fee distribution is automatic. `FEE_STAKER_SHARE_BPS = 8000` and `FEE_COMMUNITY_SHARE_BPS = 2000` are protocol constants. No individual controls the treasury.
+No individual controls the treasury. Both constants are baked into the runtime.
 
 ---
 
@@ -491,13 +491,13 @@ The board cannot unilaterally modify the protocol. Every proposal — runtime up
 
 ### 9.3 Community Voting
 
-All TWL holders can vote on proposals. Voting is stake-weighted (1 TWL = 1 vote). A proposal passes when:
+All TWL holders can vote on proposals. Voting weight is phase-dependent: during the first 20% of supply mined (0–10M TWL), voting is equal-weight (1 address = 1 vote) to prevent early whales from capturing governance while the network bootstraps. After 10M TWL has been mined, voting automatically switches to stake-weighted (1 TWL = 1 vote, capped at 100K TWL per address to limit concentration). A proposal passes when:
 
 - **Quorum:** At least 10% of circulating supply participates (Aye + Nay + Abstain).
 - **Approval:** Aye votes exceed Nay votes (simple majority).
 - **Emergency threshold:** Actions affecting the reserve or board recall require 75% Aye.
 
-There is no deposit required to submit a proposal. The quorum requirement (10% of circulating supply) is the spam filter — proposals without genuine community support simply expire without action. Approved proposals are enacted after a 7-day delay (~50,400 blocks).
+There is no deposit required to submit a proposal. The quorum requirement (10% of circulating supply) is the spam filter — proposals without genuine community support simply expire without action. Approved proposals are enacted after a 7-day delay (~100,800 blocks).
 
 ### 9.4 Safeguards
 
@@ -549,7 +549,7 @@ The protocol has no admin keys, no sudo, and no privileged accounts. An attacker
 
 Twill accumulates TVL across three independent pools:
 
-**Staking TVL** — TWL locked by PoSe stakers as collateral backing settlement integrity. Stakers earn 80% of all settlement fees proportional to their stake weight. Slashed stake is burned — stakers are financially accountable for the settlements they collateralize.
+**Staking TVL** — TWL reserved by PoSe stakers as collateral backing settlement integrity. Stakers earn 80% of all settlement fees proportional to their stake weight. Slashed stake is burned — stakers are financially accountable for the settlements they collateralize.
 
 **Settlement TVL** — TWL locked in active HTLC escrows during in-flight settlements. At meaningful settlement volume, this represents real productive capital — not idle speculation.
 

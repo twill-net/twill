@@ -26,10 +26,10 @@ pub mod pallet {
     use twill_primitives::MiningInterface;
 
     /// TWL mined threshold at which proposal voting auto-switches from 1-address-1-vote
-    /// (Equal) to TWL-weighted. Set to 1 million TWL (2% of total supply).
+    /// (Equal) to TWL-weighted. Set to 10 million TWL (20% of total supply).
     /// Below this threshold early governance is egalitarian — whoever mined first
     /// cannot dominate. Above it, stake is the sybil-resistance mechanism.
-    const VOTING_PHASE_SWITCH_THRESHOLD: u128 = 1_000_000 * twill_primitives::TWILL;
+    const VOTING_PHASE_SWITCH_THRESHOLD: u128 = 10_000_000 * twill_primitives::TWILL;
 
     /// Default maximum vote weight per address in TwlWeighted phase.
     /// Capped at 100,000 TWL (0.2% of supply) to prevent whale domination.

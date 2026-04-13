@@ -286,14 +286,17 @@ struct PoseValidator<T: Config> {
 
 #### 3.4.3 Staking Reward Distribution
 
-Settlement fees are distributed automatically in `on_finalize` each block. The fee pool balance is distributed stake-weighted across all registered stakers:
+Settlement fees are distributed automatically in `on_finalize` each block. The protocol reads the `FeePoolAccount` balance directly, splits 80% to stakers stake-weighted and 20% to the treasury:
 
 ```
+fee_pool_balance = FeePoolAccount.free_balance()
+treasury_share   = fee_pool_balance * FEE_COMMUNITY_SHARE_BPS / 10_000
+staker_pool      = fee_pool_balance - treasury_share
 for each staker in active_validator_set:
-    staker_reward = pending_fee_pool * (staker.stake / total_staked)
+    staker_reward = staker_pool * (staker.stake / total_staked)
 ```
 
-Settlement fees accumulate in the `PendingFeePool` storage item and are distributed every block. No new TWL is minted — this is redistribution of existing tokens.
+No new TWL is minted — this is redistribution of existing tokens from the fee pool account.
 
 #### 3.4.4 Inactivity Slashing
 
@@ -436,10 +439,11 @@ tip = optional, user-specified priority fee
 pub const BOOTSTRAP_THRESHOLD: u128 = 10_000_000 * TWILL; // 20% of supply
 ```
 
-Fee distribution: 100% of settlement fees go to PoSe stakers via the `PendingFeePool`. There is no treasury. Tokens flow from the fee pool account to stakers each block.
+Fee distribution: 80% of settlement fees go to PoSe stakers, 20% to the treasury. Distribution reads `FeePoolAccount` balance directly each block — no separate counter.
 
 ```rust
-pub const FEE_STAKER_SHARE_BPS: u16 = 10_000; // 100% to stakers
+pub const FEE_STAKER_SHARE_BPS: u16 = 8_000;    // 80% to stakers
+pub const FEE_COMMUNITY_SHARE_BPS: u16 = 2_000; // 20% to treasury
 ```
 
 ### 4.6 Burn Mechanism
@@ -605,7 +609,7 @@ htlc.status == Locked
 
 Upon successful settlement:
 1. All on-chain escrowed assets are released to their respective receivers.
-2. The settlement fee (10 bps) is collected and deposited to the `PendingFeePool` for staker distribution.
+2. The settlement fee (10 bps) is transferred to the `FeePoolAccount` (keyless buffer), where it accumulates for automatic distribution each block.
 3. The settlement's Merkle leaf is updated and included in the next block's settlement Merkle root via `CurrentSettlementRoot` storage.
 4. A `SettlementCompleted` event is emitted.
 
@@ -1170,14 +1174,14 @@ Slashed tokens are burned — deflationary, not redirected to any account.
 
 ### 11.1 Overview
 
-Twill governance enables TWL holders to propose and vote on protocol changes. At genesis, governance operates through a simple token-weighted voting system. Future iterations may introduce delegation, conviction voting, and council structures.
+Twill governance enables TWL holders to propose and vote on protocol changes. Voting weight is phase-dependent: equal-weight (1 address = 1 vote) during the bootstrap phase (0–10M TWL mined), then automatically switches to stake-weighted (1 TWL = 1 vote, capped at 100K TWL per address) once 10M TWL has been mined.
 
 ### 11.2 Governance Parameters
 
 | Parameter | Value |
 |-----------|-------|
 | Proposal deposit | None (quorum is the spam filter) |
-| Voting period | 7 days (50,400 blocks at 6s per block = 302,400 seconds) |
+| Voting period | 7 days (100,800 blocks at 6s per block = 604,800 seconds) |
 | Enactment delay | 7 days (after approval, before execution) |
 | Approval threshold | > 50% of participating stake |
 | Emergency threshold | > 75% of total stake |
@@ -1246,7 +1250,7 @@ enum VoteDirection {
 }
 ```
 
-**Vote weight:** 1 TWL = 1 vote. Locked tokens (vesting, staked) retain voting rights. Only free + locked balance counts; tokens in escrow (active settlements) do not.
+**Vote weight:** Phase-dependent. During the bootstrap phase (0–10M TWL mined, ~20% of total supply), voting is equal-weight: 1 address = 1 vote. This prevents early large miners from capturing governance before broad distribution exists. Once 10M TWL has been mined, the chain auto-switches to stake-weighted voting: 1 TWL = 1 vote, capped at 100,000 TWL per address. The cap prevents whale concentration while still giving larger stakeholders proportionally more say than equal-weight. Total balance (free + reserved) counts toward vote weight; tokens in active settlement escrow do not.
 
 **Quorum requirement:** A proposal is valid only if total participating stake (Aye + Nay + Abstain) >= 10% of circulating supply.
 
@@ -1327,7 +1331,8 @@ The following governance features are under consideration for future protocol up
 | `SLASH_INACTIVITY_BLOCKS` | 43,800 | blocks (~3 days) |
 | `SLASH_FIRST_BPS` | 5,000 | bps (50%) |
 | `SLASH_REPEAT_BPS` | 10,000 | bps (100%) |
-| `FEE_STAKER_SHARE_BPS` | 10,000 | bps (100% of fees to stakers) |
+| `FEE_STAKER_SHARE_BPS` | 8,000 | bps (80% of fees to stakers) |
+| `FEE_COMMUNITY_SHARE_BPS` | 2,000 | bps (20% of fees to treasury) |
 | `SETTLEMENT_FEE_BPS` | 10 | bps (0.10%) |
 | `SETTLEMENT_TIMEOUT_BLOCKS` | 20 | blocks (~2 min) |
 | `MAX_LEGS_PER_SETTLEMENT` | 10 | - |

@@ -142,6 +142,8 @@ pub mod pallet {
         ZeroThreshold,
         /// Conflicting confirmation (different txid or amount than previous relayers)
         ConflictingConfirmation,
+        /// Account is already an authorized relayer
+        AlreadyRelayer,
     }
 
     // -----------------------------------------------------------------------
@@ -212,7 +214,7 @@ pub mod pallet {
         pub fn add_relayer(origin: OriginFor<T>, who: T::AccountId) -> DispatchResult {
             ensure_root(origin)?;
             Relayers::<T>::try_mutate(|list| {
-                ensure!(!list.contains(&who), Error::<T>::AlreadyConfirmed);
+                ensure!(!list.contains(&who), Error::<T>::AlreadyRelayer);
                 list.try_push(who.clone()).map_err(|_| Error::<T>::TooManyRelayers)
             })?;
             Self::deposit_event(Event::RelayerAdded { who });

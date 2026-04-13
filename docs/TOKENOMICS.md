@@ -80,7 +80,7 @@ The total supply of 50,000,000 TWL is distributed through a single mechanism:
 | Mining Pool         | 50,000,000  | 100%       | Block rewards (halving)      |
 | **Total**           | **50,000,000** | **100%** |                              |
 
-There are no development funds, community funds, ecosystem funds, treasury pre-allocations, founder allocations, or any other supply pools. There is no protocol treasury. 100% of settlement fees go to PoSe stakers.
+There are no development funds, community funds, ecosystem funds, treasury pre-allocations, founder allocations, or any other supply pools. No pre-mine. 100% of TWL is mined.
 
 ```
 Supply Allocation
@@ -227,9 +227,10 @@ Stakers are subject to automatic slashing for inactivity:
 
 ### Fee Distribution
 
-| Recipient     | Share  | Basis Points | Mechanism                                        |
-|---------------|--------|--------------|--------------------------------------------------|
-| PoSe stakers  | 100%   | 10,000 bps   | Via `FeePoolAccount`, distributed stake-weighted |
+| Recipient     | Share  | Basis Points | Mechanism                                             |
+|---------------|--------|--------------|-------------------------------------------------------|
+| PoSe stakers  | 80%    | 8,000 bps    | Via `FeePoolAccount`, distributed stake-weighted      |
+| Treasury      | 20%    | 2,000 bps    | `SHA256("treasury")` keyless account, governance-only |
 
 ```
 Settlement Fee Flow
@@ -240,11 +241,11 @@ Settlement Fee Flow
          |
   FeePoolAccount (keyless buffer)
          |
-    100% to PoSe stakers
-    (stake-weighted, every block via on_finalize)
+    80% to PoSe stakers          20% to Treasury
+    (stake-weighted, on_finalize) (keyless, governance-controlled)
 ```
 
-Settlement fees are redistributed TWL — they do not mint new tokens and have no effect on the hard cap. There is no treasury. The full fee accumulates in the `FeePoolAccount` and is distributed proportionally to all active stakers during `on_finalize` of each block.
+Settlement fees are redistributed TWL — they do not mint new tokens and have no effect on the hard cap. The fee pool balance is read directly from the `FeePoolAccount` each block and distributed proportionally to all active stakers during `on_finalize`. The 20% treasury share transfers automatically every block, even with zero stakers active.
 
 ### Transaction Fees
 
@@ -429,7 +430,8 @@ Since there is no founder allocation and no pre-mine, all minted tokens are imme
 | `INITIAL_BLOCK_REWARD`   | 1,189,117,199,390 planck    | `primitives/src/lib.rs` |
 | `BLOCK_TIME_MS`          | 6,000 ms                    | `primitives/src/lib.rs` |
 | `SETTLEMENT_FEE_BPS`     | 10 bps                      | `primitives/src/lib.rs` |
-| `FEE_STAKER_SHARE_BPS`   | 10,000 bps (100%)           | `primitives/src/lib.rs` |
+| `FEE_STAKER_SHARE_BPS`   | 8,000 bps (80%)             | `primitives/src/lib.rs` |
+| `FEE_COMMUNITY_SHARE_BPS`| 2,000 bps (20%)             | `primitives/src/lib.rs` |
 | `SLASH_INACTIVITY_BLOCKS`| 43,800 (~3 days)            | `primitives/src/lib.rs` |
 | `SLASH_FIRST_BPS`        | 5,000 bps (50%)             | `primitives/src/lib.rs` |
 | `SLASH_REPEAT_BPS`       | 10,000 bps (100%)           | `primitives/src/lib.rs` |
@@ -450,8 +452,9 @@ Since there is no founder allocation and no pre-mine, all minted tokens are imme
 
 ```
 Miners:  Block reward (100%) — new TWL, per-block
-Stakers: Settlement fees (100%) — existing TWL redistributed
-         No overlap. No sharing. No treasury.
+Stakers: Settlement fees (80%) — existing TWL redistributed, stake-weighted
+Treasury: Settlement fees (20%) — keyless, spendable via governance proposal only
+         No overlap. Miners get 100% of new TWL. Stakers get 80% of fees.
 ```
 
 ### Economic Flow Diagram
@@ -480,8 +483,11 @@ Stakers: Settlement fees (100%) — existing TWL redistributed
       FeePoolAccount           Burn Wallet
       (keyless buffer)         (permanent)
               |
-    100% to PoSe stakers
-    (stake-weighted, each block)
+    +----80%--+----20%----+
+    |                     |
+PoSe stakers           Treasury
+(stake-weighted,    (SHA256("treasury"),
+ each block)         governance-only)
 ```
 
 ---
@@ -564,7 +570,9 @@ Permanent undershoot:                                            18,080,000 plan
 ### F. Fee Distribution Verification
 
 ```
-FEE_STAKER_SHARE_BPS = 10000 bps = 100%  [VERIFIED]
+FEE_STAKER_SHARE_BPS  = 8000 bps = 80%  to stakers
+FEE_COMMUNITY_SHARE_BPS = 2000 bps = 20% to treasury
+Total = 10000 bps = 100%  [VERIFIED]
 ```
 
 ### G. Block Reward Recipient
@@ -572,7 +580,8 @@ FEE_STAKER_SHARE_BPS = 10000 bps = 100%  [VERIFIED]
 ```
 Miners receive 100% of block_reward_at(blocks_since_genesis).
 No split. No staking share from block rewards.
-Stakers earn only from FEE_STAKER_SHARE_BPS = 10000 (100% of settlement fees).  [VERIFIED]
+Stakers earn from FEE_STAKER_SHARE_BPS = 8000 (80% of settlement fees).
+Treasury receives FEE_COMMUNITY_SHARE_BPS = 2000 (20% of settlement fees).  [VERIFIED]
 ```
 
 ### H. Slashing Math

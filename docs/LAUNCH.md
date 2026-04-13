@@ -142,7 +142,7 @@ Hard cap: 50,000,000 TWL. No more will ever exist.
 ## 6. Stake TWL (PoSe)
 
 Staking earns you a share of:
-- Settlement fees (100% to stakers, stake-weighted — no treasury)
+- Settlement fees (80% to stakers, stake-weighted; 20% to treasury)
 
 Minimum stake: 1,000 TWL
 
@@ -176,7 +176,7 @@ Bootnodes help new nodes find the network. Run one if you have a stable public I
 
 All TWL holders can:
 - Submit proposals (no deposit — quorum is the spam filter)
-- Vote on proposals (1 TWL = 1 vote)
+- Vote on proposals (equal-weight until 10M TWL mined, then stake-weighted)
 - Nominate for the board election
 - Vote in board elections
 

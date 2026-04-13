@@ -16,8 +16,8 @@ The chain is live. The board doesn't exist yet. These tasks happen first.
 | 0.2 | Publish Polkadot.js connection config | Community | DONE | `docs/polkadotjs-config.json` committed to repo. Token: TWL, 12 decimals, SS58 prefix 42. |
 | 0.3 | Announce chain launch | Community | PENDING | Post on crypto forums, Nostr, wherever. No official channel — anyone can spread the word. |
 | 0.4 | First election announcement | Community | PENDING | Post on all channels: nominations open for 7 days |
-| 0.5 | Community members nominate for board | Nominees | PENDING | Requires 100 TWL (mined or acquired). Max 7 seats. |
-| 0.6 | Community votes on nominees | TWL holders | PENDING | 1 TWL = 1 vote. 7-day voting window. |
+| 0.5 | Community members nominate for board | Nominees | PENDING | First election: no deposit required. Subsequent elections: 100 TWL. Max 7 seats. |
+| 0.6 | Community votes on nominees | TWL holders | PENDING | First election: 1 address = 1 vote (no TWL in circulation yet). 7-day voting window. |
 
 ---
 
@@ -25,12 +25,12 @@ The chain is live. The board doesn't exist yet. These tasks happen first.
 
 The board is seated. These are mandatory before Twill can operate at scale.
 
-**How the board funds itself:** There is no protocol treasury. The board is funded by:
+**How the board funds itself:** The protocol treasury (`SHA256("treasury")`) accumulates 20% of all settlement fees automatically from day one. At launch, before meaningful settlement volume exists, the treasury balance will be small. Until it grows, the board is also funded by:
 - A community donation wallet (publicly published, fully transparent). Early miners and believers send what they can.
 - Grants from aligned organizations (open-source foundations, carbon market participants, crypto infrastructure funds).
 - Once the chain has value, entities that profit from a healthy Twill (miners, exchanges, bridges) have incentive to contribute.
 
-The board does what it can afford, in order of priority. Legal first. Audit when funded. This is how Bitcoin's ecosystem works.
+The board does what it can afford, in order of priority. Legal first. Audit when funded. Board pay comes from the treasury via governance proposal — if the treasury has insufficient funds, board pay for that block is skipped. No debt accumulates.
 
 ### 1A. Legal Structure
 
