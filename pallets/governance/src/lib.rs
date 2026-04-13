@@ -92,6 +92,12 @@ pub mod pallet {
         /// Set board pay per block, paid from the treasury equally to all seated members.
         /// Default at genesis is 0. If treasury has insufficient funds, payment skips silently.
         SetBoardPay { amount_per_block: BalanceOf<T> },
+        /// Activate EVM — enables Ethereum-compatible smart contract execution via Frontier.
+        /// This is a two-step process: (1) this proposal passes and sets EvmEnabled = true,
+        /// (2) the board submits a RuntimeUpgrade proposal with a Frontier-enabled WASM build.
+        /// The community votes on both. EVM is live only after both proposals are enacted.
+        /// Once activated, any Solidity contract deployable on Ethereum deploys on Twill unchanged.
+        ActivateEvm,
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, Encode, Decode, RuntimeDebug, TypeInfo, MaxEncodedLen)]
@@ -196,6 +202,14 @@ pub mod pallet {
     #[pallet::storage]
     pub type ElectionActive<T: Config> = StorageValue<_, bool, ValueQuery>;
 
+    /// Whether EVM (Ethereum Virtual Machine) has been activated by community governance.
+    /// Default: false. Set to true when an ActivateEvm proposal is enacted.
+    /// Readable on-chain by any node to check EVM availability.
+    /// Note: a second RuntimeUpgrade proposal deploying the Frontier-enabled WASM
+    /// is required before EVM execution is actually available on-chain.
+    #[pallet::storage]
+    pub type EvmEnabled<T: Config> = StorageValue<_, bool, ValueQuery>;
+
     /// Block when current election started
     #[pallet::storage]
     pub type ElectionStartBlock<T: Config> = StorageValue<_, BlockNumberFor<T>, ValueQuery>;
@@ -231,6 +245,10 @@ pub mod pallet {
         BoardPayDistributed { per_member: BalanceOf<T>, member_count: u32 },
         /// Board pay skipped — treasury insufficient
         BoardPaySkipped,
+        /// EVM activation approved by community governance.
+        /// The board must now submit a RuntimeUpgrade proposal with the Frontier-enabled WASM
+        /// for EVM execution to become available on-chain.
+        EvmActivationApproved { block_number: BlockNumberFor<T> },
     }
 
     #[pallet::error]
@@ -516,6 +534,16 @@ pub mod pallet {
                             .try_into().unwrap_or_else(|_| BalanceOf::<T>::zero());
                         let capped = amount_per_block.min(max);
                         BoardPayPerBlock::<T>::put(capped);
+                        proposal.status = ProposalStatus::Enacted;
+                    }
+
+                    // EVM activation: set the flag and emit the signal event.
+                    // The board must still submit a RuntimeUpgrade with a Frontier-enabled
+                    // WASM build for EVM execution to become live on-chain.
+                    if let ProposalKind::ActivateEvm = proposal.kind {
+                        EvmEnabled::<T>::put(true);
+                        let block_number = frame_system::Pallet::<T>::block_number();
+                        Self::deposit_event(Event::EvmActivationApproved { block_number });
                         proposal.status = ProposalStatus::Enacted;
                     }
                 } else {

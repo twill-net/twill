@@ -25,7 +25,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 rustup target add wasm32-unknown-unknown
 
 # Clone and build
-git clone https://github.com/twill-net/twill.git
+git clone <twill-source-repo>
 cd twill
 cargo build --release
 

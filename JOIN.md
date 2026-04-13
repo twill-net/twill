@@ -28,15 +28,13 @@ View chain state in your browser:
 
 **Option A: Download pre-built binary (easiest)**
 
-Go to [Releases](https://github.com/twill-net/twill/releases) and download the latest binary for your OS:
+Download the latest binary for your OS from the Twill release page:
 
 ```bash
-# Linux
-curl -L https://github.com/twill-net/twill/releases/latest/download/twill-linux-x86_64 -o twill
+# Linux — download the linux-x86_64 binary, then:
 chmod +x twill
 
-# macOS
-curl -L https://github.com/twill-net/twill/releases/latest/download/twill-macos-arm64 -o twill
+# macOS — download the macos-arm64 binary, then:
 chmod +x twill
 ```
 
@@ -54,7 +52,7 @@ sudo apt-get install -y clang libclang-dev protobuf-compiler
 brew install protobuf
 
 # Clone and build
-git clone https://github.com/twill-net/twill.git
+git clone <twill-source-repo>
 cd twill
 cargo build --release
 cp target/release/twill ./twill
@@ -64,11 +62,7 @@ cp target/release/twill ./twill
 
 ## Step 2 — Download the chainspec
 
-```bash
-curl -L https://github.com/twill-net/twill/releases/latest/download/chainspec-raw.json -o chainspec-raw.json
-```
-
-Or if you built from source, it's already in the repo root.
+Download `chainspec-raw.json` from the Twill release page, or if you built from source it's already in the repo root.
 
 ---
 
@@ -183,4 +177,4 @@ MNEMONIC="your words" node scripts/mine.js
 
 ## Questions
 
-Open an issue on GitHub: https://github.com/twill-net/twill/issues
+Post in the Twill community forum.

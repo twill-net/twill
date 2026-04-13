@@ -582,7 +582,7 @@ Twill accumulates TVL across three independent pools:
 - Block reward halves at the first halving; settlement fee earnings grow with volume.
 - Multi-asset settlement support across crypto and carbon rails.
 - Carbon credit integration with Verra and Gold Standard registries.
-- EVM compatibility via Frontier framework for smart contract deployment.
+- **EVM activation** — the board submits an `ActivateEvm` governance proposal. The community votes. If approved, the board deploys a Frontier-enabled runtime upgrade. Once enacted, Twill supports full Ethereum-compatible smart contract execution: any Solidity contract deployable on Ethereum deploys on Twill unchanged, using existing Ethereum tooling (Hardhat, Foundry, ethers.js, wagmi). This decision belongs entirely to the board and community — no external permission required.
 - Oracle network expansion for reserve asset valuation.
 
 ### Phase 4 — Maturation

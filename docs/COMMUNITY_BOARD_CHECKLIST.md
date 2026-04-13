@@ -80,6 +80,38 @@ TWL needs to be acquirable for people to participate in mining and governance.
 
 ---
 
+## Phase 3B — EVM Activation (Board's Call)
+
+EVM activation makes Twill a full Ethereum-compatible smart contract platform. Every Solidity developer on Earth can build on Twill the same way they build on Ethereum — same tools, same languages, same contracts.
+
+The protocol already has an `ActivateEvm` governance proposal type built in. No external permission is needed. This decision belongs entirely to the board and community.
+
+**The two-step activation process:**
+
+| Step | Action | Who |
+|------|--------|-----|
+| Step 1 | Submit `ActivateEvm` governance proposal | Board |
+| Step 2 | Community votes — 50% Aye, 10% quorum required | TWL holders |
+| Step 3 | If approved: build and deploy Frontier-enabled runtime upgrade | Board + developers |
+| Step 4 | Submit `RuntimeUpgrade` governance proposal with Frontier WASM | Board |
+| Step 5 | Community votes on the runtime upgrade | TWL holders |
+| Step 6 | Frontier WASM deploys at enactment block — EVM is live | Protocol |
+
+**What EVM activation unlocks:**
+- Any Solidity contract deployable on Ethereum deploys on Twill unchanged
+- Full Ethereum toolchain support: Hardhat, Foundry, ethers.js, wagmi, viem
+- Ethereum wallets (MetaMask, Rabby) work with Twill natively
+- Every Ethereum developer on Earth can build on Twill immediately
+
+**What does NOT change:**
+- Mining, staking, settlement, governance remain identical
+- TWL supply cap, halving schedule, fee model — unchanged
+- No new token, no fork, no migration
+
+**When to activate:** The board should evaluate EVM activation when the network has enough settlement volume and TVL to attract meaningful developer activity. Premature activation adds surface area with limited benefit. Timing is a board judgment call — the community votes on it regardless.
+
+---
+
 ## Phase 4 — Bridge Infrastructure
 
 The reserve grows through atomic swaps. For the reserve to work at scale, the bridge layer must exist.
@@ -119,6 +151,44 @@ For reference — what community proposals can and cannot do:
 - Hire developers and auditors
 
 **Treasury:** 20% of all settlement fees flow to the treasury automatically from day one — even with zero stakers. Community can also vote to redirect up to 10% of block rewards to the treasury (default is 0% — miners keep 100% at launch). Accumulates in the `SHA256("treasury")` keyless account. No human can spend from it without a passed governance proposal.
+
+---
+
+## Board Pay — How It Works and How to Verify It
+
+Board pay is a governance-controlled, fully transparent on-chain mechanism. Every TWL holder can verify every payment in real time.
+
+### How board pay is set
+
+The board itself cannot set its own pay. Only a passed community proposal (`SetBoardPay`) can change it. The protocol enforces a hard cap — no governance proposal can set board pay above `MAX_BOARD_PAY_PER_BLOCK` (1 TWL per block per member, ~43,200 TWL/month per member). Any proposal exceeding this cap is silently rejected at enactment.
+
+### Where the money comes from
+
+Board pay is drawn from the treasury account (`SHA256("treasury")`). This account accumulates 20% of all settlement fees automatically. The treasury grows only from real settlement activity — there is no mechanism to mint new TWL into it.
+
+If the treasury has insufficient funds, board pay for that block is skipped. No debt accumulates. No compensation is carried forward. The community can monitor treasury balance on-chain at any time and propose actions if the balance is insufficient to fund board operations.
+
+### How to verify every payment on-chain
+
+Every board pay distribution emits a `BoardPayDistributed` event containing:
+- Each member's address
+- Amount paid
+- Block number
+
+Query via Polkadot.js:
+```
+Developer → Chain State → governance → boardMembers
+Developer → Events → filter: governance.BoardPayDistributed
+```
+
+All events are permanently on-chain. The full payment history of every board member is publicly auditable, block by block, from day one.
+
+### What the board cannot do
+
+- Set their own pay (requires community vote)
+- Pay themselves more than the protocol cap (hard-coded in runtime)
+- Spend from treasury without a passed proposal
+- Access staker fee pool (separate account, separate flow)
 
 ---
 

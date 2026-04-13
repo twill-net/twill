@@ -212,7 +212,7 @@ pub mod pallet {
     }
 
     // -----------------------------------------------------------------------
-    // OracleInterface — used by reserve pallet
+    // OracleInterface — used by reserve and settlement pallets
     // -----------------------------------------------------------------------
 
     /// One era in blocks (14,400 blocks ~ 24 hours at 6s block time)
@@ -276,6 +276,10 @@ pub mod pallet {
 
         fn is_stale(pair: AssetPair) -> bool {
             Self::get_price(pair).is_none()
+        }
+
+        fn record_settlement_price(pair: AssetPair, price: u128) {
+            Self::record_settlement_price(pair, price);
         }
     }
 }

@@ -349,6 +349,7 @@ impl pallet_settlement::Config for Runtime {
     type MiningProvider = Mining;
     type ReserveProvider = Reserve;
     type CarbonProvider = Carbon;
+    type OracleProvider = Oracle;
     type MaxExpiryPerBlock = MaxExpiryPerBlock;
 }
 

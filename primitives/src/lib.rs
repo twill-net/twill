@@ -159,6 +159,19 @@ impl RailKind {
         }
     }
 
+    /// The oracle pair used to price this rail's asset against TWL.
+    /// Returns None for TwillInternal (no external price needed) and
+    /// fiat rails (no oracle pair until governance activates them).
+    pub fn oracle_pair(&self) -> Option<AssetPair> {
+        match self {
+            Self::Bitcoin => Some(AssetPair::BtcTwl),
+            Self::Ethereum => Some(AssetPair::EthTwl),
+            Self::Solana => Some(AssetPair::SolTwl),
+            Self::Verra | Self::GoldStandard => Some(AssetPair::CarbonTwl),
+            Self::TwillInternal => None,
+            Self::Sepa | Self::Ach | Self::Swift | Self::Upi | Self::Faster => None,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -443,19 +456,26 @@ pub enum AssetPair {
     CarbonTwl,
 }
 
-/// Oracle interface — called by reserve pallet to get asset prices
+/// Oracle interface — called by reserve and settlement pallets
 pub trait OracleInterface {
-    /// Get the canonical price for an asset pair (None if no data)
+    /// Get the canonical price for an asset pair (None if no data or too stale)
     fn get_price(pair: AssetPair) -> Option<u128>;
 
     /// Check if a price feed is stale
     fn is_stale(pair: AssetPair) -> bool;
+
+    /// Record a settlement-derived price.
+    /// Called by the settlement pallet after every completed settlement.
+    /// Settlement prices are the highest-trust price inputs — they are
+    /// derived from real, on-chain economic activity.
+    fn record_settlement_price(pair: AssetPair, price: u128);
 }
 
 /// No-op oracle for testing
 impl OracleInterface for () {
     fn get_price(_: AssetPair) -> Option<u128> { None }
     fn is_stale(_: AssetPair) -> bool { true }
+    fn record_settlement_price(_: AssetPair, _: u128) {}
 }
 
 // ---------------------------------------------------------------------------

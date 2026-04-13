@@ -382,7 +382,10 @@ pub mod pallet {
                 let credit = opt.as_mut().ok_or(())?;
                 if &credit.owner != owner { return Err(()); }
                 if credit.status == CarbonStatus::Slashed { return Err(()); }
-                if credit.status != CarbonStatus::Issued { return Err(()); }
+                // Accept both Issued (pre-bond-claim) and Active (post-dispute-window) credits
+                if credit.status != CarbonStatus::Issued && credit.status != CarbonStatus::Active {
+                    return Err(());
+                }
                 credit.status = CarbonStatus::Locked;
                 TotalLocked::<T>::mutate(|t| *t = t.saturating_add(credit.amount));
                 Ok(())
@@ -390,7 +393,8 @@ pub mod pallet {
         }
 
         /// Transfer a locked carbon credit to `to` after settlement completes.
-        /// Restores status to Issued under the new owner.
+        /// Restores status to Active — the credit has passed through settlement
+        /// and is fully verified; owner should not be able to re-claim a bond.
         fn transfer_settled(credit_id: sp_core::H256, to: &T::AccountId) -> bool {
             Credits::<T>::try_mutate(credit_id, |opt| -> Result<(), ()> {
                 let credit = opt.as_mut().ok_or(())?;
@@ -400,7 +404,7 @@ pub mod pallet {
                 AccountCredits::<T>::mutate(&from, |b| *b = b.saturating_sub(amount));
                 AccountCredits::<T>::mutate(to, |b| *b = b.saturating_add(amount));
                 credit.owner = to.clone();
-                credit.status = CarbonStatus::Issued;
+                credit.status = CarbonStatus::Active;
                 TotalLocked::<T>::mutate(|t| *t = t.saturating_sub(amount));
                 Ok(())
             }).is_ok()

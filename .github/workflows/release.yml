@@ -91,7 +91,7 @@ jobs:
             ## Twill Network ${{ github.ref_name }}
 
             ### Quick Start (miners)
-            See [JOIN.md](https://github.com/twill-net/twill/blob/main/JOIN.md) for full setup instructions.
+            See `JOIN.md` in the repository for full setup instructions.
 
             ### Downloads
             - `twill-linux-x86_64` — Linux x86_64 node binary

@@ -80,6 +80,9 @@ pub mod pallet {
         /// Carbon pallet integration (lock/transfer/unlock on-chain carbon credits)
         type CarbonProvider: twill_primitives::CarbonInterface<Self::AccountId>;
 
+        /// Oracle integration — price gate and settlement-price ledger
+        type OracleProvider: twill_primitives::OracleInterface;
+
         /// Maximum settlements that can auto-expire per block
         #[pallet::constant]
         type MaxExpiryPerBlock: Get<u32>;
@@ -195,12 +198,20 @@ pub mod pallet {
             amount: BalanceOf<T>,
         },
 
-        /// Settlement completed — secret revealed, all legs claimed
+        /// Settlement completed — secret revealed, all legs claimed.
+        /// This event is the full on-chain ledger entry for every completed atomic swap.
         SettlementCompleted {
             exchange_id: H256,
             settler: T::AccountId,
             merkle_root: H256,
-            total_volume: BalanceOf<T>,
+            /// Total TWL-internal debit volume (in planck). The economic throughput of this swap.
+            total_twl_volume: BalanceOf<T>,
+            /// Settlement fee collected (in TWL planck). Flows to PoSe stakers.
+            fee: BalanceOf<T>,
+            /// Number of legs in this settlement.
+            leg_count: u32,
+            /// Block number at settlement finality.
+            block_number: BlockNumberFor<T>,
         },
 
         /// Settlement refunded — timelock expired (manual trigger)
@@ -260,6 +271,10 @@ pub mod pallet {
         DebitCreditMismatch,
         /// Expiry queue full for this block
         ExpiryQueueFull,
+        /// Oracle price unavailable for a non-TWL rail in this settlement.
+        /// Every external asset must have a live oracle price before settlement
+        /// can execute. Submit oracle prices first, then retry.
+        OraclePriceUnavailable,
     }
 
     // -----------------------------------------------------------------------
@@ -506,6 +521,45 @@ pub mod pallet {
             }
 
             // ---------------------------------------------------------------
+            // Pass 1.5: Oracle price gate
+            // Every non-TWL rail must have a live oracle price before this
+            // settlement can execute. This enforces that every asset flowing
+            // through Twill is valued — no unpriced settlement, no dark trades.
+            // ---------------------------------------------------------------
+
+            // Track external debit totals per oracle pair for price recording
+            let mut btc_debit: u128 = 0u128;
+            let mut eth_debit: u128 = 0u128;
+            let mut sol_debit: u128 = 0u128;
+            let mut carbon_debit: u128 = 0u128;
+
+            for leg in legs_info.iter() {
+                if leg.side != LegSide::Debit || leg.rail == RailKind::TwillInternal {
+                    continue;
+                }
+                match leg.rail.oracle_pair() {
+                    Some(pair) => {
+                        ensure!(
+                            T::OracleProvider::get_price(pair).map_or(false, |p| p > 0),
+                            Error::<T>::OraclePriceUnavailable
+                        );
+                        let amt: u128 = leg.amount.try_into().unwrap_or(0u128);
+                        match pair {
+                            AssetPair::BtcTwl    => btc_debit    = btc_debit.saturating_add(amt),
+                            AssetPair::EthTwl    => eth_debit    = eth_debit.saturating_add(amt),
+                            AssetPair::SolTwl    => sol_debit    = sol_debit.saturating_add(amt),
+                            AssetPair::CarbonTwl => carbon_debit = carbon_debit.saturating_add(amt),
+                        }
+                    },
+                    None => {
+                        // Rail has no oracle pair — fiat rails require governance
+                        // activation and oracle node infrastructure before use.
+                        return Err(Error::<T>::OraclePriceUnavailable.into());
+                    },
+                }
+            }
+
+            // ---------------------------------------------------------------
             // Pass 2: Calculate fee on total TWL-internal debit volume
             // ---------------------------------------------------------------
 
@@ -581,11 +635,13 @@ pub mod pallet {
                 // Deduct fee from the first debit participant of this currency
                 if !currency_fee.is_zero() {
                     if let Some(fee_payer) = currency_debits.first() {
+                        // AllowDeath: the debit participant locked these funds for settlement;
+                        // draining their account to zero is intentional and correct.
                         let _ = T::Currency::transfer(
                             &fee_payer.participant,
                             &T::FeePoolAccount::get(),
                             currency_fee,
-                            ExistenceRequirement::KeepAlive,
+                            ExistenceRequirement::AllowDeath,
                         );
                     }
                 }
@@ -608,11 +664,13 @@ pub mod pallet {
                         let transfer_amount = credit_remaining.min(debit_remaining);
 
                         if !transfer_amount.is_zero() {
+                            // AllowDeath: debit participant committed these funds at lock time;
+                            // the full locked amount must flow to credit legs.
                             let _ = T::Currency::transfer(
                                 &currency_debits[debit_idx].participant,
                                 &credit.participant,
                                 transfer_amount,
-                                ExistenceRequirement::KeepAlive,
+                                ExistenceRequirement::AllowDeath,
                             );
                         }
 
@@ -730,11 +788,47 @@ pub mod pallet {
                 }
             }
 
+            // Record settlement-derived prices to oracle.
+            // Settlement prices are the highest-trust oracle inputs — derived
+            // from real on-chain economic activity, not off-chain submissions.
+            // Price formula: price = twl_debit_total / external_debit_amount
+            // i.e. how many TWL planck per smallest unit of the external asset.
+            let twl_total: u128 = twl_debit_total.try_into().unwrap_or(0u128);
+            if twl_total > 0 {
+                if btc_debit > 0 {
+                    T::OracleProvider::record_settlement_price(
+                        AssetPair::BtcTwl,
+                        twl_total.saturating_div(btc_debit),
+                    );
+                }
+                if eth_debit > 0 {
+                    T::OracleProvider::record_settlement_price(
+                        AssetPair::EthTwl,
+                        twl_total.saturating_div(eth_debit),
+                    );
+                }
+                if sol_debit > 0 {
+                    T::OracleProvider::record_settlement_price(
+                        AssetPair::SolTwl,
+                        twl_total.saturating_div(sol_debit),
+                    );
+                }
+                if carbon_debit > 0 {
+                    T::OracleProvider::record_settlement_price(
+                        AssetPair::CarbonTwl,
+                        twl_total.saturating_div(carbon_debit),
+                    );
+                }
+            }
+
             Self::deposit_event(Event::SettlementCompleted {
                 exchange_id,
                 settler,
                 merkle_root,
-                total_volume,
+                total_twl_volume: twl_debit_total,
+                fee,
+                leg_count,
+                block_number: now,
             });
 
             Ok(())
