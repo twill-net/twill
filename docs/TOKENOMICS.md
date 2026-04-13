@@ -195,10 +195,10 @@ PoSe stakers earn from the settlement fee pool: already-minted TWL redistributed
 | Parameter                | Value                           |
 |--------------------------|---------------------------------|
 | Minimum stake            | 1,000 TWL                       |
-| Registration             | Permissionless (`register_validator`) |
+| Registration             | Permissionless — `register_validator(stake)` where `stake >= 1,000 TWL` |
 | Deregistration           | Permissionless (`deregister_validator`) |
 | Fee distribution         | Automatic, every block (`on_finalize`) |
-| Fee weighting            | Proportional to stake           |
+| Fee weighting            | Proportional to stake — higher stake earns proportionally more fees |
 | Maximum stakers          | 100 (configurable)              |
 
 ### Slashing

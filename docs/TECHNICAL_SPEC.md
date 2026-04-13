@@ -565,7 +565,8 @@ fn propose_settlement(
 **Validation rules:**
 - `legs.len() >= 1` (minimum one leg).
 - `legs.len() <= 10` (maximum legs per settlement).
-- `timeout_blocks <= SETTLEMENT_TIMEOUT_BLOCKS` (20 blocks maximum).
+- `timeout_blocks` is clamped to `[20, 14_400]` — minimum 20 blocks (~2 min) to maximum 14,400 blocks (~24 hours). Choose based on off-chain settlement requirements: BTC/ETH legs need 60–600 blocks; TWL-only or carbon-only can use 20.
+- Every settlement must include at least one `TwillInternal` (TWL) leg — direct cross-asset swaps without a TWL leg are rejected.
 - `hashlock` must not match any active settlement's hashlock (collision prevention).
 - Settlement fee (10 bps)
 
@@ -1064,7 +1065,8 @@ The genesis configuration includes:
             },
             "settlement": {
                 "max_legs_per_settlement": 10,
-                "settlement_timeout_blocks": 20,
+                "settlement_timeout_blocks_min": 20,
+                "settlement_timeout_blocks_max": 14400,
                 "fee_bps": 10
             },
             "reserve": {
@@ -1090,13 +1092,19 @@ Note: Genesis balances are empty. No pre-mine. No founder allocation. The mining
 
 ### 9.6 Runtime Upgrades
 
-The Twill runtime is compiled to WebAssembly (WASM) and stored on-chain. Runtime upgrades are executed via governance proposals (see Section 11). The upgrade process:
+The Twill runtime is compiled to WebAssembly (WASM) and stored on-chain. Runtime upgrades require a two-step governance process:
 
-1. New runtime WASM blob is submitted as a governance proposal.
-2. TWL holders vote during the voting period.
-3. If approved (> 50% of participating stake), the runtime is enacted after a 7-day delay.
-4. All nodes automatically execute the new runtime at the specified block.
-5. No hard fork required for protocol upgrades.
+**Step 1 — Authorize (on-chain vote):**
+1. Submitter publishes the new WASM build and its `blake2_256` hash off-chain.
+2. A `RuntimeUpgrade { code_hash }` governance proposal is submitted with only the hash (not the full WASM blob).
+3. TWL holders vote. If approved (> 50% participating, quorum met), the hash is written to `ApprovedUpgrade` storage after the 7-day enactment delay.
+
+**Step 2 — Apply (permissionless extrinsic):**
+4. Any account calls `governance.apply_upgrade(wasm_bytes)`.
+5. The pallet verifies `blake2_256(wasm_bytes) == ApprovedUpgrade`. If mismatch, the call is rejected.
+6. On success, `set_code` is invoked with root privileges; all nodes execute the new runtime on the next block.
+
+No hard fork is required. If the WASM is not submitted within a reasonable window the governance proposal can be re-run with a corrected hash.
 
 ---
 
@@ -1192,44 +1200,42 @@ Twill governance enables TWL holders to propose and vote on protocol changes. Vo
 
 ```rust
 #[derive(Encode, Decode, Clone, TypeInfo)]
-enum ProposalType {
-    /// Runtime upgrade: new WASM blob.
-    RuntimeUpgrade { code: Vec<u8> },
+enum ProposalKind {
+    /// Authorize a runtime upgrade. Stores the WASM blake2_256 hash on-chain.
+    /// Anyone can then call `apply_upgrade(wasm_bytes)` to complete the upgrade.
+    RuntimeUpgrade { code_hash: H256 },
 
-    /// Parameter change: modify a runtime constant.
-    ParameterChange {
-        pallet: BoundedVec<u8, MaxPalletNameLen>,
-        parameter: BoundedVec<u8, MaxParamNameLen>,
-        new_value: BoundedVec<u8, MaxValueLen>,
-    },
+    /// Recall a seated board member by account ID.
+    /// Requires 75% emergency threshold.
+    BoardRecall { member: AccountId },
 
-    /// Reserve action: rebalance, emergency withdrawal.
-    ReserveAction {
-        action: ReserveGovernanceAction,
-    },
+    /// Emergency reserve action (rebalance, asset adjustment).
+    /// Requires 75% emergency threshold.
+    EmergencyReserveAction,
 
-    /// Oracle set change: add/remove oracle.
-    OracleSetChange {
-        add: Vec<AccountId>,
-        remove: Vec<AccountId>,
-    },
+    /// Enable EVM compatibility (Frontier). Marks the upgrade path for Solidity support.
+    ActivateEvm,
 
-    /// Mining algorithm adjustment (ASIC resistance review).
-    MiningAlgorithmChange {
-        description: BoundedVec<u8, MaxDescriptionLen>,
-        code: Vec<u8>,  // new mining pallet WASM
-    },
+    /// Set the share of block rewards routed to the treasury (max 10%).
+    SetMiningTreasuryShare { bps: u16 },
 
-    /// Carbon registry addition.
-    CarbonRegistryAddition {
-        registry_id: u32,
-        name: BoundedVec<u8, MaxRegistryNameLen>,
-    },
+    /// Set board member pay rate (planck per block, divided equally among seated members).
+    SetBoardPay { amount_per_block: Balance },
 
-    /// Generic: arbitrary runtime call (requires emergency threshold).
-    Generic { call: Box<RuntimeCall> },
+    /// Switch to TWL-weighted voting before the automatic 10M TWL threshold.
+    SwitchToTwlWeightedVoting,
+
+    /// Set the per-address cap on vote weight in TWL-weighted phase.
+    SetMaxVoteWeight { twl_amount: u128 },
+
+    /// Transfer TWL from the treasury to a beneficiary.
+    TreasurySpend { beneficiary: AccountId, amount: Balance },
 }
 ```
+
+**Thresholds:**
+- Standard proposals: > 50% Aye of participating weight, quorum ≥ 10%
+- Emergency proposals (`BoardRecall`, `EmergencyReserveAction`): > 75% Aye of total issuance
 
 ### 11.4 Voting Mechanism
 
@@ -1254,29 +1260,40 @@ enum VoteDirection {
 
 **Quorum requirement:** A proposal is valid only if total participating stake (Aye + Nay + Abstain) >= 10% of circulating supply.
 
-### 11.5 Governance Lifecycle
+### 11.5 Board Elections
+
+Board elections are triggered via the permissionless `start_election()` extrinsic:
+
+- **First election:** No preconditions. Any account can call `start_election()` at any time to bootstrap the initial board. Since TWL is not yet circulating at genesis, voting is equal-weight (1 address = 1 vote).
+- **Subsequent elections:** `start_election()` can be called once the seated board's 5-year term has elapsed. The chain enforces the term length on-chain; early calls are rejected.
+- Candidates nominate themselves (100 TWL deposit for post-genesis elections).
+- Voting runs for the standard voting period; the top 5–7 candidates by vote weight are seated.
+
+### 11.6 Governance Lifecycle
 
 ```
 1. Proposal Submission
-   - Any TWL holder submits ProposalType (no deposit required)
+   - Any TWL holder calls `submit_proposal(kind)` (no deposit required)
    - Proposal enters 'Pending' state
 
 2. Voting Period (7 days)
-   - TWL holders vote Aye/Nay/Abstain
-   - Votes are weighted by TWL balance
+   - TWL holders vote Aye/Nay/Abstain via `vote(proposal_id, direction)`
+   - Weight: equal (1 address = 1 vote) during bootstrap; TWL-weighted after 10M mined
 
 3. Tally
    - If quorum met AND Aye > Nay: Approved
    - If quorum met AND Nay >= Aye: Rejected
-   - If quorum not met: Expired (no deposit to return)
+   - If quorum not met: Expired
 
 4. Enactment Delay (7 days)
    - Approved proposals wait 7 days before execution
-   - Allows participants to exit if they disagree with the outcome
+   - Allows participants to adjust positions if they disagree
 
 5. Execution
-   - Proposal is automatically enacted at the scheduled block
-   - Runtime upgrades, parameter changes, etc.
+   - Proposal enacted automatically at the scheduled block
+   - RuntimeUpgrade: stores code_hash → anyone calls apply_upgrade(wasm) to complete
+   - TreasurySpend: transfer executed if treasury has sufficient balance
+   - Parameter changes: storage values updated immediately
 ```
 
 ### 11.6 Governance Storage
