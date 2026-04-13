@@ -202,17 +202,17 @@ The community should monitor these addresses to verify fees are flowing correctl
 Holds settlement fees as a buffer before distributing the staker share (80%) to
 active PoSe validators each block. **When there are no active stakers**, the staker
 portion remains in this account accumulating until validators register. The 20%
-community share is always transferred to the community pool regardless of staker status.
+treasury share is always transferred to the treasury regardless of staker status.
 
 **Community action required:** None to activate. The account exists from genesis.
 The board should publish the derived SS58 address so anyone can monitor it on-chain.
 
-### Community Pool Account
-**Derivation:** `SHA256("community_pool")`
+### Treasury Account
+**Derivation:** `SHA256("treasury")`
 
-Receives 20% of all settlement fees automatically every block fees are available —
-**even when there are zero stakers active**. This account accumulates from day one
-of settlement activity.
+Receives 20% of all settlement fees automatically every block — **even when there
+are zero stakers active**. Also receives any governance-voted share of block rewards
+(default 0%, community can vote up to 10%). Accumulates from day one of settlement activity.
 
 **Community action required:**
 1. The board must publish the derived SS58 address so anyone can verify the balance.
@@ -223,7 +223,7 @@ To derive the addresses yourself (verify them independently):
 ```rust
 // In any Substrate environment:
 use sp_core::crypto::Ss58Codec;
-let community_pool = twill_primitives::derive_safety_wallet(b"community_pool");
+let treasury = twill_primitives::derive_safety_wallet(b"treasury");
 let fee_pool = twill_primitives::derive_safety_wallet(b"fee_pool");
 // Convert to SS58 AccountId for on-chain lookup
 ```
@@ -233,6 +233,19 @@ let fee_pool = twill_primitives::derive_safety_wallet(b"fee_pool");
 
 Holds deposited reserve assets (wBTC, wETH, wUSDC, carbon credits). The reserve
 value is publicly auditable on-chain at all times via `pallet_reserve::TotalReserveValue`.
+
+---
+
+## Security Note: ForceOrigin on Assets Pallet
+
+Auditors will find one `ForceOrigin = EnsureRoot` in the runtime — on the **Assets pallet only**, which manages bridge-wrapped assets (wBTC, wETH, wUSDC). This is a custodial bridge admin key for Phase 1, required to mint/burn wrapped asset representations when the custodial bridge processes deposits and withdrawals.
+
+**What it controls:** Only the Assets pallet — creation and management of wrapped asset tokens.
+**What it cannot do:** It has no access to settlement logic, staked funds, mining rewards, the treasury, the fee pool, or the reserve vault. It cannot pause the chain, cancel settlements, or modify governance.
+
+This key is a known Phase 1 trust assumption. Phase 2 replaces it with a trustless bridge (e.g. threshold-signature multisig or light-client proof). The community should treat it as a temporary custodial risk and prioritize the Phase 2 trustless bridge upgrade.
+
+**The settlement pallets, mining pallet, and governance pallet have zero privileged origins.** All calls require a signed user account or are triggered automatically by the protocol itself.
 
 ---
 

@@ -422,9 +422,9 @@ The minimum fee is 0.1 TWL, preventing dust-value settlements from consuming net
 Settlement fees are split automatically by the protocol every block:
 
 - **PoSe Stakers (80%):** Distributed stake-weighted to all active stakers. This is the primary incentive for collateralizing settlement infrastructure.
-- **Community Pool (20%):** Transferred to the keyless `SHA256("community_pool")` account. Spendable only by a passed governance proposal. Accumulates from block one — even with zero stakers active.
+- **Treasury (20%):** Transferred to the keyless `SHA256("treasury")` account. Spendable only by a passed governance proposal. Accumulates from block one — even with zero stakers active. Community can also vote to redirect up to 10% of block rewards to the treasury (default: 0% at genesis).
 
-There is no treasury controlled by any individual or entity. Fee distribution is automatic. `FEE_STAKER_SHARE_BPS = 8000` and `FEE_COMMUNITY_SHARE_BPS = 2000` are protocol constants.
+Fee distribution is automatic. `FEE_STAKER_SHARE_BPS = 8000` and `FEE_COMMUNITY_SHARE_BPS = 2000` are protocol constants. No individual controls the treasury.
 
 ---
 

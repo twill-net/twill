@@ -216,10 +216,10 @@ parameter_types! {
     pub FeePoolAccount: AccountId = AccountId::new(
         twill_primitives::derive_safety_wallet(twill_primitives::SAFETY_WALLET_FEE_POOL)
     );
-    /// Community pool: accumulates 20% of all settlement fees.
-    /// Governed by community proposals. No private key. Protocol-controlled.
-    pub CommunityPoolAccount: AccountId = AccountId::new(
-        twill_primitives::derive_safety_wallet(twill_primitives::SAFETY_WALLET_COMMUNITY_POOL)
+    /// Treasury: accumulates 20% of all settlement fees and any governance-voted
+    /// share of block rewards. No private key. Spendable only via passed proposals.
+    pub TreasuryAccount: AccountId = AccountId::new(
+        twill_primitives::derive_safety_wallet(twill_primitives::SAFETY_WALLET_TREASURY)
     );
     pub BurnAccount: AccountId = AccountId::new(
         twill_primitives::derive_safety_wallet(twill_primitives::SAFETY_WALLET_BURN)
@@ -364,7 +364,7 @@ impl pallet_mining::Config for Runtime {
     type MaxPoseValidators = MaxPoseValidators;
     type MinPoseStake = MinPoseStake;
     type FeePoolAccount = FeePoolAccount;
-    type CommunityPoolAccount = CommunityPoolAccount;
+    type TreasuryAccount = TreasuryAccount;
 }
 
 impl pallet_carbon::Config for Runtime {
@@ -392,6 +392,7 @@ impl pallet_oracle::Config for Runtime {
 impl pallet_governance::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type Currency = Balances;
+    type MiningProvider = pallet_mining::Pallet<Runtime>;
     type MaxBoardMembers = MaxBoardMembers;
     type BoardTermBlocks = BoardTermBlocks;
     type VotingPeriodBlocks = VotingPeriodBlocks;

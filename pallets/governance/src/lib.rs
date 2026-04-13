@@ -23,6 +23,7 @@ pub mod pallet {
     };
     use frame_system::pallet_prelude::*;
     use sp_runtime::traits::{Saturating, Zero};
+    use twill_primitives::MiningInterface;
 
     type BalanceOf<T> =
         <<T as Config>::Currency as Currency<<T as frame_system::Config>::AccountId>>::Balance;
@@ -34,6 +35,8 @@ pub mod pallet {
     pub trait Config: frame_system::Config {
         type RuntimeEvent: From<Event<Self>> + IsType<<Self as frame_system::Config>::RuntimeEvent>;
         type Currency: ReservableCurrency<Self::AccountId>;
+        /// Mining pallet interface — used to enact SetMiningTreasuryShare proposals.
+        type MiningProvider: twill_primitives::MiningInterface<Self::AccountId>;
 
         /// Maximum board members (5-7)
         #[pallet::constant]
@@ -78,6 +81,9 @@ pub mod pallet {
         BoardRecall { member: T::AccountId },
         /// Text proposal — non-binding resolution (for signaling)
         TextProposal,
+        /// Set the share of block rewards redirected to the treasury (in BPS, max 1000 = 10%).
+        /// Default at genesis is 0 — miners keep 100%. Community votes to activate.
+        SetMiningTreasuryShare { bps: u16 },
     }
 
     #[derive(Clone, Copy, PartialEq, Eq, Encode, Decode, RuntimeDebug, TypeInfo, MaxEncodedLen)]
@@ -442,6 +448,12 @@ pub mod pallet {
                         Self::deposit_event(Event::BoardMemberRecalled {
                             member: member.clone(),
                         });
+                        proposal.status = ProposalStatus::Enacted;
+                    }
+
+                    // Mining treasury share: take effect immediately on approval
+                    if let ProposalKind::SetMiningTreasuryShare { bps } = proposal.kind {
+                        T::MiningProvider::set_treasury_mining_share(bps);
                         proposal.status = ProposalStatus::Enacted;
                     }
                 } else {

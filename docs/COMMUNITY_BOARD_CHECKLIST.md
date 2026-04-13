@@ -118,7 +118,7 @@ For reference — what community proposals can and cannot do:
 - Engage with Verra, Gold Standard, exchanges
 - Hire developers and auditors
 
-**Community pool:** 20% of all settlement fees flow to the community pool automatically from day one — even with zero stakers. This accumulates in the `SHA256("community_pool")` keyless account. No human can spend from it without a passed governance proposal.
+**Treasury:** 20% of all settlement fees flow to the treasury automatically from day one — even with zero stakers. Community can also vote to redirect up to 10% of block rewards to the treasury (default is 0% — miners keep 100% at launch). Accumulates in the `SHA256("treasury")` keyless account. No human can spend from it without a passed governance proposal.
 
 ---
 

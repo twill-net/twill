@@ -340,6 +340,10 @@ pub enum CarbonStatus {
 
 /// Interface for the mining pallet — called by settlement pallet
 /// to update settlement Merkle root and track validator activity.
+/// Maximum share of block reward that governance can redirect to the treasury.
+/// 1000 = 10%. Default at genesis is 0 (miners keep 100%).
+pub const MINING_TREASURY_SHARE_MAX_BPS: u16 = 1_000;
+
 pub trait MiningInterface<AccountId> {
     /// Update the settlement Merkle root used in PoC puzzle generation
     fn update_settlement_root(merkle_root: H256);
@@ -349,6 +353,10 @@ pub trait MiningInterface<AccountId> {
 
     /// Accumulate settlement fees for distribution to validators
     fn accumulate_fee(amount: u128);
+
+    /// Set the treasury share of block rewards (in BPS). Capped at MINING_TREASURY_SHARE_MAX_BPS.
+    /// Called by governance on proposal enactment.
+    fn set_treasury_mining_share(bps: u16);
 }
 
 /// No-op implementation for testing or when mining is disabled
@@ -356,6 +364,7 @@ impl<AccountId> MiningInterface<AccountId> for () {
     fn update_settlement_root(_: H256) {}
     fn record_validator_activity(_: &AccountId) {}
     fn accumulate_fee(_: u128) {}
+    fn set_treasury_mining_share(_: u16) {}
 }
 
 /// Validator status check — used by oracle pallet to verify
@@ -475,7 +484,9 @@ pub const SAFETY_WALLET_BURN: &[u8] = b"burn";
 /// Keyless — no private key, no governance control.
 /// 100% in, 100% out. It is a buffer, not a treasury.
 pub const SAFETY_WALLET_FEE_POOL: &[u8] = b"fee_pool";
-pub const SAFETY_WALLET_COMMUNITY_POOL: &[u8] = b"community_pool";
+/// Treasury: receives 20% of settlement fees and optionally a % of block rewards.
+/// Governed by on-chain proposals — no individual can spend from it.
+pub const SAFETY_WALLET_TREASURY: &[u8] = b"treasury";
 pub const SAFETY_WALLET_EMERGENCY: &[u8] = b"emergency_reserve";
 pub const SAFETY_WALLET_TIMELOCK: &[u8] = b"governance_timelock";
 

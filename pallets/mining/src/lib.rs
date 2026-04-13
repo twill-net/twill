@@ -62,10 +62,10 @@ pub mod pallet {
         #[pallet::constant]
         type FeePoolAccount: Get<Self::AccountId>;
 
-        /// Community pool account — accumulates 20% of all settlement fees.
-        /// Governed by community proposals. Grows from real settlement activity.
+        /// Treasury account — accumulates 20% of all settlement fees and optionally
+        /// a governance-voted share of block rewards. Spendable only via passed proposals.
         #[pallet::constant]
-        type CommunityPoolAccount: Get<Self::AccountId>;
+        type TreasuryAccount: Get<Self::AccountId>;
     }
 
     // -----------------------------------------------------------------------
@@ -103,6 +103,11 @@ pub mod pallet {
     /// Settlement fees accumulated for distribution to stakers
     #[pallet::storage]
     pub type PendingFeePool<T: Config> = StorageValue<_, BalanceOf<T>, ValueQuery>;
+    /// Governance-adjustable share of block rewards redirected to the treasury (in BPS).
+    /// Default: 0 (miners keep 100%). Max: MINING_TREASURY_SHARE_MAX_BPS (10%).
+    /// Set via SetMiningTreasuryShare governance proposal.
+    #[pallet::storage]
+    pub type MiningTreasuryShareBps<T: Config> = StorageValue<_, u16, ValueQuery>;
     /// Last block each staker was active (for auto-slashing)
     #[pallet::storage]
     pub type LastActiveBlock<T: Config> =
@@ -244,7 +249,8 @@ pub mod pallet {
             let genesis = GenesisBlock::<T>::get();
             let blocks_since: u64 = now.saturating_sub(genesis).try_into().unwrap_or(0u64);
 
-            // Miner gets 100% of the block reward. Only mining creates new TWL.
+            // Block reward split: miner gets (10000 - treasury_bps) / 10000.
+            // Treasury share is 0 at genesis. Community can vote to redirect up to 10%.
             let mining_reward = block_reward_at(blocks_since);
 
             let remaining = MINING_POOL.saturating_sub(total_minted);
@@ -255,15 +261,25 @@ pub mod pallet {
                 return Ok(PostDispatchInfo { actual_weight: None, pays_fee: Pays::No });
             }
 
-            let reward_balance: BalanceOf<T> = actual_reward
+            let treasury_bps = MiningTreasuryShareBps::<T>::get() as u128;
+            let treasury_amount = actual_reward.saturating_mul(treasury_bps) / 10_000u128;
+            let miner_amount = actual_reward.saturating_sub(treasury_amount);
+
+            let miner_balance: BalanceOf<T> = miner_amount
                 .try_into().map_err(|_| Error::<T>::MiningPoolExhausted)?;
-            let _ = T::Currency::deposit_creating(&miner, reward_balance);
+            let _ = T::Currency::deposit_creating(&miner, miner_balance);
+
+            if treasury_amount > 0 {
+                let treasury_balance: BalanceOf<T> = treasury_amount
+                    .try_into().unwrap_or_else(|_| BalanceOf::<T>::zero());
+                let _ = T::Currency::deposit_creating(&T::TreasuryAccount::get(), treasury_balance);
+            }
 
             TotalMinted::<T>::mutate(|m| *m = m.saturating_add(actual_reward));
             TotalPocRewards::<T>::mutate(|r| *r = r.saturating_add(actual_reward));
             LastPocRewardBlock::<T>::put(now);
 
-            Self::deposit_event(Event::BlockMined { miner, reward: reward_balance, block_number: now });
+            Self::deposit_event(Event::BlockMined { miner, reward: miner_balance, block_number: now });
 
             // Bootstrap: fee-free until 2.5M TWL mined, then small fee
             let pays = if total_minted < BOOTSTRAP_THRESHOLD { Pays::No } else { Pays::Yes };
@@ -359,15 +375,25 @@ pub mod pallet {
                 return Ok(());
             }
 
-            let reward_balance: BalanceOf<T> = actual_reward
+            let treasury_bps = MiningTreasuryShareBps::<T>::get() as u128;
+            let treasury_amount = actual_reward.saturating_mul(treasury_bps) / 10_000u128;
+            let miner_amount = actual_reward.saturating_sub(treasury_amount);
+
+            let miner_balance: BalanceOf<T> = miner_amount
                 .try_into().map_err(|_| Error::<T>::MiningPoolExhausted)?;
-            let _ = T::Currency::deposit_creating(&miner, reward_balance);
+            let _ = T::Currency::deposit_creating(&miner, miner_balance);
+
+            if treasury_amount > 0 {
+                let treasury_balance: BalanceOf<T> = treasury_amount
+                    .try_into().unwrap_or_else(|_| BalanceOf::<T>::zero());
+                let _ = T::Currency::deposit_creating(&T::TreasuryAccount::get(), treasury_balance);
+            }
 
             TotalMinted::<T>::mutate(|m| *m = m.saturating_add(actual_reward));
             TotalPocRewards::<T>::mutate(|r| *r = r.saturating_add(actual_reward));
             LastPocRewardBlock::<T>::put(now);
 
-            Self::deposit_event(Event::BlockMined { miner, reward: reward_balance, block_number: now });
+            Self::deposit_event(Event::BlockMined { miner, reward: miner_balance, block_number: now });
             Ok(())
         }
     }
@@ -442,6 +468,12 @@ pub mod pallet {
                 .try_into().unwrap_or_else(|_| BalanceOf::<T>::max_value());
             PendingFeePool::<T>::mutate(|pool| { *pool = pool.saturating_add(balance); });
         }
+
+        /// Set the treasury share of block rewards. Called by governance on enactment.
+        fn set_treasury_mining_share(bps: u16) {
+            let capped = bps.min(twill_primitives::MINING_TREASURY_SHARE_MAX_BPS);
+            MiningTreasuryShareBps::<T>::put(capped);
+        }
     }
 
     impl<T: Config> twill_primitives::ValidatorOracle<T::AccountId> for Pallet<T> {
@@ -482,7 +514,7 @@ pub mod pallet {
                 let community_amount: BalanceOf<T> = community_share.try_into().unwrap_or_else(|_| BalanceOf::<T>::zero());
                 let _ = T::Currency::transfer(
                     &T::FeePoolAccount::get(),
-                    &T::CommunityPoolAccount::get(),
+                    &T::TreasuryAccount::get(),
                     community_amount,
                     ExistenceRequirement::KeepAlive,
                 );
