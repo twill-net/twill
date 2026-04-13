@@ -19,8 +19,9 @@
 7. [Settlement Protocol](#7-settlement-protocol)
 8. [Carbon Integration](#8-carbon-integration)
 9. [Governance](#9-governance)
-10. [Roadmap](#10-roadmap)
-11. [Conclusion](#11-conclusion)
+10. [Network Properties](#10-network-properties)
+11. [Roadmap](#11-roadmap)
+12. [Conclusion](#12-conclusion)
 
 ---
 
@@ -418,12 +419,12 @@ fee = max(min_fee, twl_debit_volume * 0.001)
 
 The minimum fee is 0.1 TWL, preventing dust-value settlements from consuming network resources without compensation.
 
-Settlement fees flow 100% to PoSe stakers:
+Settlement fees are split automatically by the protocol every block:
 
-- **PoSe Stakers (100%):** Accumulated in the fee pool and distributed stake-weighted to all active stakers each block. This is the primary incentive for collateralizing settlement infrastructure.
+- **PoSe Stakers (80%):** Distributed stake-weighted to all active stakers. This is the primary incentive for collateralizing settlement infrastructure.
+- **Community Pool (20%):** Transferred to the keyless `SHA256("community_pool")` account. Spendable only by a passed governance proposal. Accumulates from block one — even with zero stakers active.
 
-There is no treasury. No portion of fees is withheld by the protocol, by a board, or by any entity.
-Fee distribution is automatic. No human routes fees. `FEE_STAKER_SHARE_BPS = 10000` is a protocol constant.
+There is no treasury controlled by any individual or entity. Fee distribution is automatic. `FEE_STAKER_SHARE_BPS = 8000` and `FEE_COMMUNITY_SHARE_BPS = 2000` are protocol constants.
 
 ---
 
@@ -507,7 +508,56 @@ There is no deposit required to submit a proposal. The quorum requirement (10% o
 
 ---
 
-## 10. Roadmap
+## 10. Network Properties
+
+### 10.1 Network Effects
+
+Settlement networks strengthen with use. Each participant who settles through Twill expands the counterparty graph — more addresses with active HTLCs means tighter price discovery and faster settlement matching for every subsequent party.
+
+Three compounding loops drive this:
+
+**Settlement liquidity loop:** More active settlement counterparties → better pricing → more settlement volume → more fees → more stakers → better settlement reliability → more volume.
+
+**Security loop:** More staked TWL → higher cost to attack settlement proofs → more institutional confidence → more high-value settlements → higher TWL demand → more stakers.
+
+**Carbon loop:** More carbon credits retired on-chain → more auditable retirement certificates → more demand from compliance buyers → more carbon settlement volume → more fees for stakers.
+
+Each loop reinforces the others. A protocol that settles more becomes more valuable to settle through.
+
+### 10.2 Developer Ecosystem
+
+Twill is built on polkadot-sdk — a modular FRAME runtime framework with a large global developer community. Every developer familiar with Substrate can read, audit, and extend Twill's pallets from day one. No proprietary SDK, no new programming model.
+
+FRAME pallets are composable modules. New asset types, new rail integrations, and new settlement logic can be added in isolation without touching consensus, storage, or existing settlement logic. The pallet boundary is a clean interface — `pallet-carbon` knows nothing about `pallet-settlement` internals and vice versa.
+
+The WebAssembly runtime upgrade mechanism means protocol improvements deploy without hard forks. A governance-approved upgrade takes effect at the next block after the enactment delay — no coordinated node restart, no network split.
+
+### 10.3 Security Model
+
+Twill's consensus, storage, and cryptographic layer is polkadot-sdk stable2409 — one of the most extensively reviewed blockchain codebases running in production. The Merklized state trie, block production engine, and peer networking are not bespoke implementations.
+
+Settlement security does not depend on any trusted party:
+
+- No custodian holds assets during an HTLC.
+- No oracle determines settlement validity.
+- No admin can pause, cancel, or modify an in-flight settlement.
+- The SHA256 hashlock preimage is the only key. Whoever holds the preimage claims the output — no exceptions.
+
+The protocol has no admin keys, no sudo, and no privileged accounts. An attacker who compromises every board member's credentials cannot steal funds, cannot pause the chain, and cannot alter settlement logic. The protocol enforces itself.
+
+### 10.4 Total Value Locked
+
+Twill accumulates TVL across three independent pools:
+
+**Staking TVL** — TWL locked by PoSe stakers as collateral backing settlement integrity. Stakers earn 80% of all settlement fees proportional to their stake weight. Slashed stake is burned — stakers are financially accountable for the settlements they collateralize.
+
+**Settlement TVL** — TWL locked in active HTLC escrows during in-flight settlements. At meaningful settlement volume, this represents real productive capital — not idle speculation.
+
+**Reserve TVL** — wBTC, wETH, and wUSDC held in the protocol reserve vault. Governance-controlled, not withdrawable without a community vote. Sets the mathematical floor: `floor = reserve_value / circulating_supply`. Reserve TVL cannot be diluted — no new TWL is ever minted outside of mining.
+
+---
+
+## 11. Roadmap
 
 ### Phase 1 — Foundation
 
@@ -550,7 +600,7 @@ There is no deposit required to submit a proposal. The quorum requirement (10% o
 
 ---
 
-## 11. Conclusion
+## 12. Conclusion
 
 The digital asset landscape has produced stores of value without utility, utility tokens without value floors, and stable assets without decentralization. Each addresses part of the problem. None addresses all of it.
 
