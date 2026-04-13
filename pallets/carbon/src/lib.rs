@@ -218,6 +218,13 @@ pub mod pallet {
             T::Currency::unreserve(&issuer, bond);
             IssuanceBonds::<T>::remove(credit_id);
 
+            // Transition to Active — credit is now usable in settlements and retirements
+            Credits::<T>::try_mutate(credit_id, |opt| -> DispatchResult {
+                let credit = opt.as_mut().ok_or(Error::<T>::CreditNotFound)?;
+                credit.status = CarbonStatus::Active;
+                Ok(())
+            })?;
+
             Self::deposit_event(Event::BondReturned { credit_id, issuer, amount: bond });
             Ok(())
         }
@@ -230,7 +237,7 @@ pub mod pallet {
             Credits::<T>::try_mutate(credit_id, |opt| -> DispatchResult {
                 let credit = opt.as_mut().ok_or(Error::<T>::CreditNotFound)?;
                 ensure!(credit.owner == who, Error::<T>::NotOwner);
-                ensure!(credit.status == CarbonStatus::Issued, Error::<T>::InvalidCreditStatus);
+                ensure!(credit.status == CarbonStatus::Active, Error::<T>::InvalidCreditStatus);
                 credit.status = CarbonStatus::Locked;
                 TotalLocked::<T>::mutate(|t| *t = t.saturating_add(credit.amount));
                 Self::deposit_event(Event::CreditLocked { credit_id, amount: credit.amount });
@@ -247,7 +254,7 @@ pub mod pallet {
                 let credit = opt.as_mut().ok_or(Error::<T>::CreditNotFound)?;
                 ensure!(credit.owner == who, Error::<T>::NotOwner);
                 ensure!(
-                    credit.status == CarbonStatus::Issued || credit.status == CarbonStatus::Locked,
+                    credit.status == CarbonStatus::Active || credit.status == CarbonStatus::Locked,
                     Error::<T>::InvalidCreditStatus
                 );
                 let was_locked = credit.status == CarbonStatus::Locked;

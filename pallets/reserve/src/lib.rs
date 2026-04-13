@@ -201,8 +201,11 @@ pub mod pallet {
                         return original_amount.saturating_mul(price) / TWILL;
                     }
                 }
+                // Oracle stale or price zero — return 0, not raw amount.
+                // A missing price must not inflate the reserve valuation.
+                return 0;
             }
-            original_amount
+            0
         }
 
         pub fn composition() -> (u16, u16, u16, u16) {

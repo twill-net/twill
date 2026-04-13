@@ -86,6 +86,10 @@ pub const SLASH_REPEAT_BPS: u16 = 10000;
 /// Carbon issuance bond: 100 TWL
 pub const CARBON_ISSUANCE_BOND: u128 = 100 * TWILL;
 
+/// Maximum board pay per block that governance can set: 1 TWL per block per member.
+/// At 5 members that's 5 TWL/block max — ~26M TWL/year, well within community oversight.
+pub const MAX_BOARD_PAY_PER_BLOCK: u128 = TWILL;
+
 /// Carbon dispute window in blocks (~7 days)
 pub const CARBON_DISPUTE_WINDOW: u32 = 100_800;
 
@@ -326,7 +330,10 @@ pub enum CarbonRegistry {
     Clone, Copy, PartialEq, Eq, Encode, Decode, RuntimeDebug, TypeInfo, MaxEncodedLen,
 )]
 pub enum CarbonStatus {
+    /// Issued, bond posted — in dispute window. Cannot be used in settlements or retired yet.
     Issued,
+    /// Dispute window passed, bond claimed — fully active and usable.
+    Active,
     Locked,
     Retired,
     Transferred,

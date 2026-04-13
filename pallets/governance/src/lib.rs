@@ -510,9 +510,12 @@ pub mod pallet {
                         proposal.status = ProposalStatus::Enacted;
                     }
 
-                    // Board pay: take effect immediately on approval
+                    // Board pay: take effect immediately on approval, capped at protocol maximum
                     if let ProposalKind::SetBoardPay { amount_per_block } = proposal.kind {
-                        BoardPayPerBlock::<T>::put(amount_per_block);
+                        let max: BalanceOf<T> = twill_primitives::MAX_BOARD_PAY_PER_BLOCK
+                            .try_into().unwrap_or_else(|_| BalanceOf::<T>::zero());
+                        let capped = amount_per_block.min(max);
+                        BoardPayPerBlock::<T>::put(capped);
                         proposal.status = ProposalStatus::Enacted;
                     }
                 } else {
