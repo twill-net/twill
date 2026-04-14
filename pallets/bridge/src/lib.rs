@@ -73,18 +73,21 @@ pub mod pallet {
     #[pallet::storage]
     pub type ConfirmationThreshold<T: Config> = StorageValue<_, u8, ValueQuery>;
 
-    /// Per-relayer confirmation records: (exchange_id, relayer) → deposit info
+    /// Per-relayer confirmation records: ((exchange_id, leg_index), relayer) → deposit info.
+    /// Each external leg is confirmed independently — a settlement with both a BTC
+    /// leg and an ETH leg requires two separate confirmation sets.
     #[pallet::storage]
     pub type RelayerConfirmations<T: Config> = StorageDoubleMap<
         _,
-        Blake2_128Concat, H256,
+        Blake2_128Concat, (H256, u32),
         Blake2_128Concat, T::AccountId,
         BridgeDepositInfo<T>,
     >;
 
-    /// exchange_id → confirmed (true once threshold reached)
+    /// (exchange_id, leg_index) → confirmed (true once threshold reached)
     #[pallet::storage]
-    pub type ConfirmedDeposits<T: Config> = StorageMap<_, Blake2_128Concat, H256, bool, ValueQuery>;
+    pub type ConfirmedDeposits<T: Config> =
+        StorageMap<_, Blake2_128Concat, (H256, u32), bool, ValueQuery>;
 
     // -----------------------------------------------------------------------
     // Genesis
@@ -114,15 +117,16 @@ pub mod pallet {
     #[pallet::event]
     #[pallet::generate_deposit(pub(super) fn deposit_event)]
     pub enum Event<T: Config> {
-        /// A relayer submitted a deposit confirmation
+        /// A relayer submitted a partial confirmation for a leg
         PartialConfirmation {
             exchange_id: H256,
+            leg_index: u32,
             relayer: T::AccountId,
             confirmations: u8,
             threshold: u8,
         },
-        /// Deposit reached threshold — settlement may proceed
-        DepositConfirmed { exchange_id: H256, asset: BridgeAsset, amount: u128 },
+        /// Leg reached confirmation threshold — settlement may proceed for this leg
+        DepositConfirmed { exchange_id: H256, leg_index: u32, asset: BridgeAsset, amount: u128 },
         RelayerAdded { who: T::AccountId },
         RelayerRemoved { who: T::AccountId },
         ThresholdChanged { new_threshold: u8 },
@@ -152,14 +156,21 @@ pub mod pallet {
 
     #[pallet::call]
     impl<T: Config> Pallet<T> {
-        /// Relayer confirms an off-chain deposit.
-        /// All relayers must submit the same `chain_txid` and `amount` — mismatches
-        /// are rejected to prevent a single malicious relayer from poisoning the set.
+        /// Relayer confirms an off-chain deposit for a specific leg within a settlement.
+        ///
+        /// `leg_index` is the 0-based position of the BTC/ETH/SOL leg within the
+        /// settlement's leg list. A settlement with two external legs (e.g. BTC and ETH)
+        /// requires separate `confirm_deposit` calls for each leg.
+        ///
+        /// All relayers must submit the same `chain_txid` and `amount` for a given
+        /// (exchange_id, leg_index) — mismatches are rejected to prevent a single
+        /// malicious relayer from poisoning the confirmation set.
         #[pallet::call_index(0)]
         #[pallet::weight(Weight::from_parts(60_000_000, 0))]
         pub fn confirm_deposit(
             origin: OriginFor<T>,
             exchange_id: H256,
+            leg_index: u32,
             asset: BridgeAsset,
             chain_txid: H256,
             amount: u128,
@@ -169,13 +180,15 @@ pub mod pallet {
             let relayers = Relayers::<T>::get();
             ensure!(relayers.contains(&who), Error::<T>::NotRelayer);
 
+            let leg_key = (exchange_id, leg_index);
+
             ensure!(
-                !RelayerConfirmations::<T>::contains_key(exchange_id, &who),
+                !RelayerConfirmations::<T>::contains_key(leg_key, &who),
                 Error::<T>::AlreadyConfirmed
             );
 
-            // If other relayers have already confirmed, ensure txid+amount match
-            let existing: Vec<_> = RelayerConfirmations::<T>::iter_prefix(exchange_id).collect();
+            // If other relayers have already confirmed this leg, ensure txid+amount match
+            let existing: Vec<_> = RelayerConfirmations::<T>::iter_prefix(leg_key).collect();
             if let Some((_, first)) = existing.first() {
                 ensure!(
                     first.chain_txid == chain_txid && first.amount == amount,
@@ -185,7 +198,7 @@ pub mod pallet {
 
             let now = frame_system::Pallet::<T>::block_number();
             RelayerConfirmations::<T>::insert(
-                exchange_id,
+                leg_key,
                 &who,
                 BridgeDepositInfo { asset, chain_txid, amount, confirmed_at: now },
             );
@@ -194,11 +207,12 @@ pub mod pallet {
             let count = (existing.len() as u8).saturating_add(1);
 
             if count >= threshold {
-                ConfirmedDeposits::<T>::insert(exchange_id, true);
-                Self::deposit_event(Event::DepositConfirmed { exchange_id, asset, amount });
+                ConfirmedDeposits::<T>::insert(leg_key, true);
+                Self::deposit_event(Event::DepositConfirmed { exchange_id, leg_index, asset, amount });
             } else {
                 Self::deposit_event(Event::PartialConfirmation {
                     exchange_id,
+                    leg_index,
                     relayer: who,
                     confirmations: count,
                     threshold,
@@ -253,8 +267,8 @@ pub mod pallet {
     // -----------------------------------------------------------------------
 
     impl<T: Config> twill_primitives::BridgeInterface for Pallet<T> {
-        fn is_deposit_confirmed(exchange_id: H256) -> bool {
-            ConfirmedDeposits::<T>::get(exchange_id)
+        fn is_deposit_confirmed(exchange_id: H256, leg_index: u32) -> bool {
+            ConfirmedDeposits::<T>::get((exchange_id, leg_index))
         }
     }
 }

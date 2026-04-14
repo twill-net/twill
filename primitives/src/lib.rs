@@ -493,14 +493,15 @@ impl OracleInterface for () {
 /// Bridge interface — called by settlement pallet to verify off-chain deposits
 /// before executing BTC/ETH/SOL legs.
 pub trait BridgeInterface {
-    /// Returns true if an off-chain deposit for this exchange_id has been
-    /// confirmed by enough relayers.
-    fn is_deposit_confirmed(exchange_id: H256) -> bool;
+    /// Returns true if the specified leg within a settlement has been confirmed
+    /// by enough relayers. Keyed by (exchange_id, leg_index) so multi-chain
+    /// settlements with more than one external leg can be confirmed independently.
+    fn is_deposit_confirmed(exchange_id: H256, leg_index: u32) -> bool;
 }
 
 /// No-op bridge (used in tests or when bridge pallet is absent)
 impl BridgeInterface for () {
-    fn is_deposit_confirmed(_: H256) -> bool { false }
+    fn is_deposit_confirmed(_: H256, _: u32) -> bool { false }
 }
 
 // ---------------------------------------------------------------------------

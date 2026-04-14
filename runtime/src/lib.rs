@@ -121,7 +121,7 @@ pub const VERSION: sp_version::RuntimeVersion = sp_version::RuntimeVersion {
     spec_name: create_runtime_str!("twill"),
     impl_name: create_runtime_str!("twill-node"),
     authoring_version: 1,
-    spec_version: 103,
+    spec_version: 104,
     impl_version: 1,
     apis: RUNTIME_API_VERSIONS,
     transaction_version: 1,
@@ -364,6 +364,7 @@ impl pallet_reserve::Config for Runtime {
     type RuntimeEvent = RuntimeEvent;
     type MaxReserveAssets = MaxReserveAssets;
     type Oracle = Oracle;
+    type Currency = Balances;
 }
 
 impl pallet_mining::Config for Runtime {

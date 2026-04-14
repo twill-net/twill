@@ -518,7 +518,7 @@ pub mod pallet {
             // ---------------------------------------------------------------
 
             struct LegInfo<AccountId, Balance> {
-                _index: u32,
+                index: u32,
                 participant: AccountId,
                 amount: Balance,
                 domain: AssetDomain,
@@ -537,7 +537,7 @@ pub mod pallet {
                 total_volume = total_volume.saturating_add(leg.amount);
 
                 legs_info.push(LegInfo {
-                    _index: i,
+                    index: i,
                     participant: leg.participant.clone(),
                     amount: leg.amount,
                     domain: leg.domain,
@@ -615,7 +615,7 @@ pub mod pallet {
                 match leg.rail {
                     RailKind::Bitcoin | RailKind::Ethereum | RailKind::Solana => {
                         ensure!(
-                            T::BridgeProvider::is_deposit_confirmed(exchange_id),
+                            T::BridgeProvider::is_deposit_confirmed(exchange_id, leg.index),
                             Error::<T>::BridgeConfirmationRequired
                         );
                     },
