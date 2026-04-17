@@ -58,6 +58,6 @@ exec "$BINARY" \
     --rpc-port "$RPC_PORT" \
     --rpc-cors none \
     --rpc-methods Safe \
-    --name "twill-node-$(hostname)" \
+    --name "twill-node-$(hostname | tr -cd '[:alnum:]-' | head -c 32)" \
     $BOOTNODE_ARG \
     "$@"
