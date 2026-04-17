@@ -94,8 +94,17 @@ Leave this running in one terminal. Your node will connect to the genesis bootno
 ./twill key generate --scheme sr25519
 ```
 
-Save the **secret phrase** (12 words) somewhere safe. This is your wallet.
-The **SS58 Address** is your public mining address where rewards are sent.
+The command prints three things: the **secret phrase** (12 words), the **public key**, and the **SS58 Address**.
+
+- The **SS58 Address** is your public mining address — this is where rewards are sent. Share it freely.
+- The **secret phrase** is your wallet. Anyone with these twelve words controls every TWL ever mined to this address. There is no password reset. There is no recovery.
+
+**Back it up in at least three places before starting the miner:**
+1. Write the words on paper and put the paper somewhere physical.
+2. Save them in a password manager (1Password, Bitwarden, KeePassXC).
+3. Store an encrypted copy offline (USB drive, encrypted note on a second device).
+
+If the miner crashes, the disk dies, or the laptop is lost, only the mnemonic brings the coins back.
 
 ---
 
@@ -217,8 +226,29 @@ MNEMONIC="your words" node scripts/mine.js
 - Make sure you did NOT use `--tmp` when starting the node
 - Your `chain-data/` directory must be preserved between restarts
 
+**GPU miner panics on startup:**
+
+The GPU helper compiles a WGSL compute shader at launch. Different GPUs/drivers enforce different WGSL rules. If you see one of:
+- `name 'target' is a reserved keyword`
+- `Alignment requirements for address space Uniform are not met`
+- `Expression may only be indexed by a constant`
+- `MSL: FeatureNotImplemented("atomic CompareExchange")`
+- `dispatch group size dimension must be less or equal to 65535`
+
+make sure you are building from main (`v0.2.1` or later) — earlier tags had shader issues that showed up only on some GPU backends. `git pull && cargo build --release -p twill-miner` and retry.
+
+**CPU fallback for any GPU issue:**
+
+If the GPU helper panics and you want to keep going without debugging it, force CPU mode:
+```bash
+TWILL_MINER=cpu MNEMONIC="your words" node scripts/mine.js
+```
+CPU mining is slow — fine for verifying the flow, not for actually winning blocks at mainnet difficulty.
+
 ---
 
 ## Questions
 
-Post in the Twill community forum.
+Join the Discord: <https://discord.gg/waRhYDFn>
+
+Or open an issue on GitHub: <https://github.com/twill-net/twill/issues>
