@@ -300,8 +300,10 @@ pub mod pallet {
         BoardElected { members: sp_std::vec::Vec<T::AccountId>, term_start: BlockNumberFor<T> },
         /// Board pay distributed this block (amount per member, number of members)
         BoardPayDistributed { per_member: BalanceOf<T>, member_count: u32 },
-        /// Board pay skipped — treasury insufficient
-        BoardPaySkipped,
+        /// Board pay skipped because the treasury cannot cover all seated
+        /// members in full this block. Carries the shortfall so observers can
+        /// distinguish "treasury empty" from generic "skipped".
+        BoardPayInsufficientTreasury { needed: BalanceOf<T>, available: BalanceOf<T> },
         /// EVM activation approved by community governance.
         /// The board must now submit a RuntimeUpgrade proposal with the Frontier-enabled WASM
         /// for EVM execution to become available on-chain.
@@ -342,6 +344,11 @@ pub mod pallet {
         /// Submitted WASM code does not match the authorized upgrade hash.
         /// Compute blake2_256(wasm_code) and ensure it matches the authorized hash.
         UpgradeHashMismatch,
+        /// Genesis-election sybil guard: caller must have mined at least one
+        /// block before they can nominate or vote in the first board election.
+        /// This binds genesis governance to proven hashpower instead of free
+        /// address creation.
+        NoMinedBlocks,
     }
 
     // -----------------------------------------------------------------------
@@ -509,6 +516,12 @@ pub mod pallet {
 
             let is_genesis_election = ElectionCount::<T>::get() == 0;
             let deposit = if is_genesis_election {
+                // Sybil guard: TWL is not yet circulating, so deposit cannot
+                // gate spam. Require proof of at least one mined block instead.
+                ensure!(
+                    T::MiningProvider::blocks_mined_by(&nominee) >= 1,
+                    Error::<T>::NoMinedBlocks,
+                );
                 BalanceOf::<T>::zero()
             } else {
                 let d = T::NominationDeposit::get();
@@ -534,9 +547,15 @@ pub mod pallet {
             ensure!(ElectionActive::<T>::get(), Error::<T>::ElectionNotActive);
             ensure!(Nominees::<T>::contains_key(&nominee), Error::<T>::NotANominee);
 
-            // Genesis election: 1 address = 1 vote (TWL may not be circulating yet).
+            // Genesis election: 1 mined-block address = 1 vote.
+            // (TWL may not be circulating yet, so balance is not a useful weight,
+            //  and free addresses must not be — proof of hashpower is the gate.)
             // All subsequent elections: 1 TWL = 1 vote (balance-weighted).
             let weight = if ElectionCount::<T>::get() == 0 {
+                ensure!(
+                    T::MiningProvider::blocks_mined_by(&voter) >= 1,
+                    Error::<T>::NoMinedBlocks,
+                );
                 BalanceOf::<T>::from(1u32)
             } else {
                 T::Currency::total_balance(&voter)
@@ -642,8 +661,12 @@ pub mod pallet {
             let treasury_balance = T::Currency::free_balance(&treasury);
 
             // Must be able to cover everyone + keep treasury alive
-            if treasury_balance < total_needed.saturating_add(T::Currency::minimum_balance()) {
-                Self::deposit_event(Event::BoardPaySkipped);
+            let needed_with_ed = total_needed.saturating_add(T::Currency::minimum_balance());
+            if treasury_balance < needed_with_ed {
+                Self::deposit_event(Event::BoardPayInsufficientTreasury {
+                    needed: needed_with_ed,
+                    available: treasury_balance,
+                });
                 return;
             }
 

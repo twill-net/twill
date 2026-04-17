@@ -571,6 +571,7 @@ pub mod pallet {
             let mut btc_debit: u128 = 0u128;
             let mut eth_debit: u128 = 0u128;
             let mut sol_debit: u128 = 0u128;
+            let mut usdc_debit: u128 = 0u128;
             let mut carbon_debit: u128 = 0u128;
 
             for leg in legs_info.iter() {
@@ -588,6 +589,7 @@ pub mod pallet {
                             AssetPair::BtcTwl    => btc_debit    = btc_debit.saturating_add(amt),
                             AssetPair::EthTwl    => eth_debit    = eth_debit.saturating_add(amt),
                             AssetPair::SolTwl    => sol_debit    = sol_debit.saturating_add(amt),
+                            AssetPair::UsdcTwl   => usdc_debit   = usdc_debit.saturating_add(amt),
                             AssetPair::CarbonTwl => carbon_debit = carbon_debit.saturating_add(amt),
                             // Fiat rails (USD/EUR) recorded for completeness; settlement
                             // price feedback not yet wired for fiat (no on-chain counterpart)
@@ -732,12 +734,15 @@ pub mod pallet {
                         if !transfer_amount.is_zero() {
                             // AllowDeath: debit participant committed these funds at lock time;
                             // the full locked amount must flow to credit legs.
-                            let _ = T::Currency::transfer(
+                            // Hard fail: if any leg transfer fails, the entire dispatch
+                            // returns Err and Substrate atomically rolls back the fee
+                            // transfer and any prior leg transfers in this settlement.
+                            T::Currency::transfer(
                                 &currency_debits[debit_idx].participant,
                                 &credit.participant,
                                 transfer_amount,
                                 ExistenceRequirement::AllowDeath,
-                            );
+                            )?;
                         }
 
                         credit_remaining = credit_remaining.saturating_sub(transfer_amount);
@@ -837,6 +842,7 @@ pub mod pallet {
                             RailKind::Bitcoin => ReserveAssetKind::BTC,
                             RailKind::Ethereum => ReserveAssetKind::ETH,
                             RailKind::Solana => ReserveAssetKind::SOL,
+                            RailKind::Usdc => ReserveAssetKind::USDC,
                             _ => ReserveAssetKind::Other,
                         },
                         AssetDomain::Carbon => ReserveAssetKind::CarbonCredit,
@@ -874,6 +880,12 @@ pub mod pallet {
                     T::OracleProvider::record_settlement_price(
                         AssetPair::SolTwl,
                         twl_total.saturating_div(sol_debit),
+                    );
+                }
+                if usdc_debit > 0 {
+                    T::OracleProvider::record_settlement_price(
+                        AssetPair::UsdcTwl,
+                        twl_total.saturating_div(usdc_debit),
                     );
                 }
                 if carbon_debit > 0 {

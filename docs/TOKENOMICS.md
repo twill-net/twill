@@ -267,9 +267,12 @@ When an atomic settlement completes and includes crypto or carbon asset legs, th
 |----------------|-------------|
 | wBTC           | BtcTwl      |
 | wETH           | EthTwl      |
+| wSOL           | SolTwl      |
 | wUSDC          | UsdcTwl     |
 | Carbon Credit  | CarbonTwl   |
-| Other          | Raw amount   |
+| Other          | (no oracle) |
+
+The `Other` bucket lets the Assets pallet wrap and hold additional reserve assets without immediate code changes. Promoting any new asset to a first-class reserve (its own `RailKind`, `AssetPair`, and `ReserveAssetKind` variant with oracle pricing) is a runtime upgrade decided by community governance.
 
 ### Floor Price
 

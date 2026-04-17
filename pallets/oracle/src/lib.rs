@@ -92,6 +92,15 @@ pub mod pallet {
     pub type OcwPrices<T: Config> =
         StorageMap<_, Blake2_128Concat, AssetPair, (u128, BlockNumberFor<T>), OptionQuery>;
 
+    /// The most recent block at which `get_price` had to fall back to an OCW
+    /// price for the given pair. Off-chain monitors can read this to detect
+    /// a degraded oracle state (validators offline / submitting stale prices).
+    /// Updated only when the OCW path is actually taken — never written from
+    /// the canonical or validator-consensus paths.
+    #[pallet::storage]
+    pub type LastOcwFallbackAt<T: Config> =
+        StorageMap<_, Blake2_128Concat, AssetPair, BlockNumberFor<T>, OptionQuery>;
+
     // -----------------------------------------------------------------------
     // Types
     // -----------------------------------------------------------------------
@@ -318,6 +327,7 @@ pub mod pallet {
                 (b"btc_twl",    AssetPair::BtcTwl),
                 (b"eth_twl",    AssetPair::EthTwl),
                 (b"sol_twl",    AssetPair::SolTwl),
+                (b"usdc_twl",   AssetPair::UsdcTwl),
                 (b"carbon_twl", AssetPair::CarbonTwl),
                 (b"usd_twl",    AssetPair::UsdTwl),
                 (b"eur_twl",    AssetPair::EurTwl),
@@ -391,9 +401,11 @@ pub mod pallet {
                 }
             }
 
-            // OCW fallback: automated exchange feed, lower trust than validators
+            // OCW fallback: automated exchange feed, lower trust than validators.
+            // Record that we degraded so monitors can flag the oracle state.
             if let Some((ocw_price, ocw_block)) = OcwPrices::<T>::get(pair) {
                 if now.saturating_sub(ocw_block) <= threshold {
+                    LastOcwFallbackAt::<T>::insert(pair, now);
                     return Some(ocw_price);
                 }
             }

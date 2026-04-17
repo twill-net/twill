@@ -42,15 +42,15 @@ impl SubstrateCli for Cli {
     }
 
     fn author() -> String {
-        "Twill Foundation".into()
+        "Twill Network".into()
     }
 
     fn support_url() -> String {
-        "<twill-repo-url>/issues".into()
+        "https://github.com/twill-net/twill/issues".into()
     }
 
     fn copyright_start_year() -> i32 {
-        2024
+        2026
     }
 
     fn load_spec(&self, id: &str) -> Result<Box<dyn sc_service::ChainSpec>, String> {

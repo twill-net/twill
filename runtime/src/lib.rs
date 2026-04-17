@@ -312,7 +312,8 @@ impl pallet_transaction_payment::Config for Runtime {
 }
 
 // ---------------------------------------------------------------------------
-// Assets (wrapped crypto: wBTC, wETH, wSOL)
+// Assets (wrapped crypto: wBTC, wETH, wSOL, wUSDC) and any future
+// reserve assets added through community-governance runtime upgrade.
 // ---------------------------------------------------------------------------
 
 impl pallet_assets::Config for Runtime {

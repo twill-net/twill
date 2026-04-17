@@ -2,6 +2,8 @@
 //!
 //! Core types shared across all Twill pallets and the runtime.
 
+// Made by Monk.
+
 #![cfg_attr(not(feature = "std"), no_std)]
 
 use codec::{Decode, Encode, MaxEncodedLen};
@@ -135,19 +137,23 @@ pub enum AssetDomain {
     Clone, Copy, PartialEq, Eq, Encode, Decode, RuntimeDebug, TypeInfo, MaxEncodedLen,
 )]
 pub enum RailKind {
-    // Crypto
+    // Crypto — first-class settlement rails. Scaffolding for the major reserve
+    // assets at launch. Adding a new crypto rail is a runtime upgrade
+    // (governance proposal). The `Other` reserve variant absorbs assets that
+    // are wrapped through the Assets pallet but do not yet have a dedicated rail.
     Bitcoin,
     Ethereum,
     Solana,
+    Usdc,
     // Carbon
     Verra,
     GoldStandard,
     // Native
     TwillInternal,
-    // Fiat — activated by community governance runtime upgrade.
-    // Each variant represents a specific fiat payment network.
-    // Off-chain settlement is confirmed by oracle nodes monitoring
-    // the respective payment network before releasing the TWL leg.
+    // Fiat — staged for future activation. Not part of the launch surface.
+    // A community governance runtime upgrade is required to enable any of
+    // these, plus oracle nodes monitoring the respective payment network
+    // before releasing the TWL leg.
     Sepa,   // EU SEPA credit transfer
     Ach,    // US ACH (Automated Clearing House)
     Swift,  // International wire (SWIFT)
@@ -158,7 +164,7 @@ pub enum RailKind {
 impl RailKind {
     pub fn domain(&self) -> AssetDomain {
         match self {
-            Self::Bitcoin | Self::Ethereum | Self::Solana => AssetDomain::Crypto,
+            Self::Bitcoin | Self::Ethereum | Self::Solana | Self::Usdc => AssetDomain::Crypto,
             Self::Verra | Self::GoldStandard => AssetDomain::Carbon,
             Self::TwillInternal => AssetDomain::Crypto,
             Self::Sepa | Self::Ach | Self::Swift | Self::Upi | Self::Faster => AssetDomain::Fiat,
@@ -173,6 +179,7 @@ impl RailKind {
             Self::Bitcoin => Some(AssetPair::BtcTwl),
             Self::Ethereum => Some(AssetPair::EthTwl),
             Self::Solana => Some(AssetPair::SolTwl),
+            Self::Usdc => Some(AssetPair::UsdcTwl),
             Self::Verra | Self::GoldStandard => Some(AssetPair::CarbonTwl),
             Self::TwillInternal => None,
             // Fiat rails: EUR for SEPA, USD for everything else
@@ -330,7 +337,15 @@ pub enum ReserveAssetKind {
     BTC,
     ETH,
     SOL,
+    USDC,
     CarbonCredit,
+    /// Catch-all for assets wrapped through the Assets pallet that do not
+    /// yet have a dedicated rail / oracle pair.
+    ///
+    /// Reserve floor contribution: zero. `oracle_value_twl(Other, _)` returns 0
+    /// and `composition()` excludes this bucket from its tuple. An asset stays
+    /// in `Other` until the community ships a runtime upgrade promoting it to
+    /// a first-class variant with its own oracle pair and rail.
     Other,
 }
 
@@ -385,6 +400,12 @@ pub trait MiningInterface<AccountId> {
 
     /// Return total TWL minted so far. Used by governance for voting phase transitions.
     fn total_minted() -> u128;
+
+    /// Return number of blocks `who` has mined.
+    /// Used by governance to gate the genesis election against sybil attacks —
+    /// only addresses that have proven actual hashpower may nominate or vote
+    /// before TWL is in circulation.
+    fn blocks_mined_by(who: &AccountId) -> u32;
 }
 
 /// No-op implementation for testing or when mining is disabled
@@ -393,6 +414,7 @@ impl<AccountId> MiningInterface<AccountId> for () {
     fn record_validator_activity(_: &AccountId) {}
     fn set_treasury_mining_share(_: u16) {}
     fn total_minted() -> u128 { 0 }
+    fn blocks_mined_by(_: &AccountId) -> u32 { 0 }
 }
 
 /// Validator status check — used by oracle pallet to verify
@@ -461,10 +483,12 @@ pub enum AssetPair {
     BtcTwl,
     EthTwl,
     SolTwl,
+    /// USDC stablecoin / TWL — distinct from fiat USD pair below
+    UsdcTwl,
     CarbonTwl,
-    /// USD/TWL — used by ACH, SWIFT, UPI, Faster Payments fiat rails
+    /// Fiat USD/TWL — staged for ACH, SWIFT, UPI, Faster Payments rails
     UsdTwl,
-    /// EUR/TWL — used by SEPA fiat rail
+    /// Fiat EUR/TWL — staged for SEPA rail
     EurTwl,
 }
 

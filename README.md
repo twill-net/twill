@@ -1,12 +1,10 @@
 # Twill Network (TWL)
 
-**The cross-border atomic settlement rail.**
+**Community settlement, woven together atomically.**
 
-Twill is a Layer 1 blockchain built for one purpose: to settle any asset against any other asset, across any border, atomically. Bitcoin to Carbon. Ethereum to BTC. Carbon to TWL. All-or-nothing, no counterparty, no custodian, no rails you don't own.
+Twill is a Layer 1 blockchain for one job: settle any asset against any other asset, across any border, in a single atomic operation. Bitcoin to Carbon. Ethereum to BTC. Carbon to TWL. All-or-nothing — no counterparty, no custodian, no rails anyone can pull.
 
-TWL is the settlement currency. It is how assets move. When you want carbon credits, you pay TWL. When you want BTC settled on-chain, you route through TWL. Carbon credit issuers post a TWL bond. The reserve vault grows with every asset deposited. Every TWL in circulation was earned — mined or earned through settlement — never allocated.
-
-No admin keys. No owner. After genesis, the chain runs itself.
+TWL is the thread. Every cross-asset swap is woven through it. Every TWL in circulation was earned — mined or paid as a settlement fee — never allocated. The chain has no owner and no admin shortcut: every privileged path runs through community governance.
 
 ## Quick Facts
 
@@ -19,16 +17,20 @@ No admin keys. No owner. After genesis, the chain runs itself.
 | Block Time | 6 seconds |
 | Consensus | Proof of Compute + Proof of Settlement (unified) |
 | Settlement | Cross-border HTLC atomic swaps — any asset, any rail |
+| Network Status | Live — genesis bootnode shipped in `mainnet-raw.json` |
+| Genesis Bootnode | `/ip4/140.82.10.138/tcp/30333/p2p/12D3KooWGrvFo7bFjgWyVj5boBumVYEQq2Q6VywKht9Pgsz4RUMa` |
 
 ## How It Works
 
-**Settlement.** Atomic HTLC multi-leg swaps. Lock funds, reveal the preimage, all legs settle simultaneously or all refund. BTC ↔ TWL ↔ Carbon. Any combination. No counterparty risk.
+**Settlement.** Atomic HTLC multi-leg swaps. Lock funds, reveal the preimage, every leg settles or every leg refunds. The HTLC engine is asset-agnostic: any rail wired up to it can participate in the same atomic swap. No counterparty risk.
 
-**TWL as the rail.** Every cross-asset swap routes through TWL. Carbon credits require a TWL bond to issue. Reserve assets are priced in TWL. This is not a fee mechanism — it is how value flows through the protocol.
+**TWL as the thread.** Every cross-asset swap routes through TWL. Carbon credits require a TWL bond to issue. Reserve assets are priced in TWL. This is not a fee mechanism — it is how value moves through the protocol.
 
-**Mining.** Anyone submits Proof of Compute solutions. The block hash incorporates the settlement Merkle root — block production and settlement verification are a single operation. Block rewards halve every 4 years over ~20 years.
+**What ships at genesis vs. what is scaffolded.** The settlement engine, mining, staking, oracle, governance, carbon issuance, and the TWL ↔ TWL leg are live the moment the chain produces blocks. External-asset rails (BTC, ETH, SOL, USDC, fiat) are scaffolded — the settlement engine accepts them, but the bridges and oracle feeds that make those rails trustless are activated by the community board after audit. See [ASSET_RAILS.md](docs/ASSET_RAILS.md) for the per-asset status and activation path.
 
-**Staking.** Stake TWL to process settlements and submit oracle prices. Rewards are 100% settlement fees, stake-weighted. Inactive stakers get auto-slashed.
+**Mining.** Anyone submits Proof of Compute solutions. The block hash incorporates the settlement Merkle root — block production and settlement verification are a single operation. Block rewards halve every 21,024,000 blocks (~4 years at 6s blocks).
+
+**Staking.** Stake TWL to process settlements and submit oracle prices. Rewards are settlement fees, stake-weighted. Inactive stakers get auto-slashed.
 
 **Carbon.** Permissionless carbon credit issuance. Post a TWL bond, issue verified tCO2e credits on-chain. Lock, retire, or trade atomically against any other asset. Credits are slashable if fraudulent.
 
@@ -36,17 +38,20 @@ No admin keys. No owner. After genesis, the chain runs itself.
 
 | Allocation | Amount | How |
 |------------|--------|-----|
-| Mining Pool | 50,000,000 (100%) | PoC + PoSe block rewards, halving every 4 years |
+| Mining Pool | 50,000,000 (100%) | PoC + PoSe block rewards, halving every 21,024,000 blocks |
 
-No pre-mine. No founder allocation. No dev fund. No treasury. Every TWL is mined.
+No pre-mine. No founder allocation. No dev fund. No team treasury. Every TWL is mined.
 
-## Autonomous Design
+## Governance Posture
 
 After genesis block 0:
-- **Zero admin extrinsics** in any pallet
-- **Automatic** epoch transitions, reward distribution, slashing, settlement expiry
-- **Permissionless** mining, settlement, staker registration, oracle feeds, carbon issuance
-- **No sudo, no governance keys** — the chain moderates itself
+
+- **No sudo pallet.** No `sudo`, no root key, no foundation multisig.
+- **Privileged extrinsics exist** in some pallets (relayer registry, carbon bond slashing, reserve redemption fulfillment) but every one is gated behind `EnsureRoot`. The only way to reach `EnsureRoot` is a runtime upgrade — and runtime upgrades themselves are governance proposals voted on by the community board.
+- **Automatic** epoch transitions, reward distribution, slashing, and settlement expiry — no human in the loop.
+- **Permissionless** mining, settlement submission, staker registration, oracle feeds, and carbon issuance.
+
+The chain runs itself. Anything that touches privileged state has to be proposed, voted, and executed on-chain.
 
 ## Architecture
 
@@ -96,7 +101,3 @@ cargo test --all               # Run tests
 ## License
 
 Apache 2.0
-
----
-
-*Made by Monk. Owned by nobody.*

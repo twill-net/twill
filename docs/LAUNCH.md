@@ -25,7 +25,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 rustup target add wasm32-unknown-unknown
 
 # Clone and build
-git clone <twill-source-repo>
+git clone https://github.com/twill-net/twill
 cd twill
 cargo build --release
 
@@ -56,12 +56,20 @@ Or regenerate it yourself (produces identical output — the genesis is determin
 
 ## 3. Run a Node
 
+The genesis bootnode is baked into `mainnet-raw.json`:
+
+```
+/ip4/140.82.10.138/tcp/30333/p2p/12D3KooWGrvFo7bFjgWyVj5boBumVYEQq2Q6VywKht9Pgsz4RUMa
+```
+
+Your node picks it up automatically — no env vars required.
+
 ```bash
-# Basic — connect and sync
+# Basic — connect and sync (uses the bootnode embedded in mainnet-raw.json)
 ./scripts/run-node.sh
 
-# With a bootnode (needed until peer discovery fills in)
-BOOTNODE=/ip4/BOOTNODE_IP/tcp/30333/p2p/PEER_ID ./scripts/run-node.sh
+# Add an additional bootnode (optional — for peer diversity)
+BOOTNODE=/ip4/OTHER_IP/tcp/30333/p2p/OTHER_PEER_ID ./scripts/run-node.sh
 
 # Custom data directory
 BASE_PATH=/data/twill ./scripts/run-node.sh
@@ -215,8 +223,17 @@ systemctl start twill-bootnode
 
 Bridge relayers watch Bitcoin, Ethereum, and Solana chains and submit on-chain confirmations
 when a deposit arrives. Without at least 2 active relayers, BTC/ETH/SOL settlement legs cannot
-execute. This is a trusted community role — relayers must be added by the board via
-`bridge.addRelayer(who)` after launch.
+execute. This is a trusted community role.
+
+**Launch posture.** The chain ships with **no genesis relayers and no genesis threshold
+override**. Cross-chain settlement is therefore disabled at block 1. Native TWL settlement,
+mining, staking, governance, and carbon-credit lifecycle all work without relayers.
+
+The first community board, once elected, votes (via a `RuntimeUpgrade` governance proposal)
+to seat the initial relayer set and confirmation threshold. Subsequent additions and
+removals follow the same governance path until the bridge module is migrated to a
+permissionless multi-sig. Until then, the relayer-management extrinsics are
+`ensure_root` and reachable only through a passing on-chain governance proposal.
 
 **What a relayer does:**
 1. Watches a designated deposit address on Bitcoin / Ethereum / Solana
@@ -336,8 +353,9 @@ the board based on the price at time of transfer.
 ## Troubleshooting
 
 **Node won't connect to peers:**
-- Pass `--bootnodes` with a known bootnode address
-- Check firewall: port 30333 (P2P) must be open
+- The genesis bootnode (`/ip4/140.82.10.138/tcp/30333/p2p/12D3KooWGrvFo7bFjgWyVj5boBumVYEQq2Q6VywKht9Pgsz4RUMa`) is embedded in `mainnet-raw.json` — make sure you're using the repo's canonical spec
+- Check firewall: port 30333 (P2P) must be open outbound
+- Pass an additional `--bootnodes` address if you want peer diversity
 
 **RPC not accessible:**
 - Default RPC listens on `127.0.0.1:9944` (local only)
@@ -354,27 +372,49 @@ the board based on the price at time of transfer.
 
 ## Community
 
-Twill is permissionless. The community coordinates off-chain through:
+Twill is permissionless. Coordination happens in two places:
 
-- **Discord** — real-time discussion, node announcements, bridge relay coordination
-- **On-chain governance** — all binding decisions happen on-chain
+- **Discord** — discussion, announcements, bridge relay and oracle operator coordination: <https://discord.gg/waRhYDFn>
+- **On-chain governance** — every binding decision lives on-chain in `pallet-governance`
 
-**Recommended Discord channels:**
+**Suggested Discord channels:**
 ```
 #general          — open discussion
 #announcements    — chain status, upgrade votes, election notices
 #mining           — mining tips, difficulty tracking, hardware
 #validators       — staking, inactivity alerts, fee distribution
 #bridge-relay     — relay operators, deposit address coordination
-#oracle           — price feed operators, API endpoint sharing
+#oracle           — price feed operators, endpoint sharing
 #governance       — proposal discussion before on-chain submission
 #bootnodes        — bootnode addresses, network health
 #dev              — integrations, tooling, protocol development
 ```
 
-**On-chain first.** Discord is coordination. Decisions that matter — proposal votes,
-board elections, relay additions — happen on-chain and cannot be overridden by any
-off-chain communication.
+**On-chain first.** Discord is talk. Votes — board elections, community proposals,
+relayer adds, runtime upgrades — happen on-chain. A Discord majority cannot overrule
+the chain.
+
+### How community voting actually works
+
+All voting is on-chain via `pallet-governance`. The path:
+
+1. **Discuss** in Discord (`#governance`).
+2. **Submit** the proposal on-chain by calling one of:
+   - `governance.community_propose(kind, payload)` — for treasury changes, bridge
+     relayer additions, runtime upgrades, etc.
+   - `governance.nominate(candidate)` — to nominate a board candidate during an
+     election window.
+3. **Vote** by calling `governance.vote_on_proposal(id, aye_or_nay)` (community
+   proposals) or `governance.vote(candidate)` (board elections). Voting weight is
+   one-address-one-vote during the bootstrap phase (first 10M TWL mined), then
+   TWL-weighted thereafter.
+4. **Execute.** After the voting window closes, anyone can call
+   `governance.execute_proposal(id)` (community) or `governance.finalize_election()`
+   (board). Passing thresholds: 50% Aye + 10% quorum for ordinary proposals, 75%
+   for emergency proposals (recall, reserve actions).
+
+The easiest UI today is **Polkadot.js Apps → Developer → Extrinsics → governance.\<call\>**,
+and **Chain State → governance.proposals** to read live tallies.
 
 ---
 

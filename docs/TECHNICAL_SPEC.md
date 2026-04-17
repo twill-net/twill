@@ -1079,14 +1079,13 @@ The genesis configuration includes:
                 "issuance_bond_twl": 100,
                 "dispute_window_blocks": 100800,
                 "max_project_id_length": 128
-            },
-            "governance": {
-                "board_size": 5
             }
         }
     }
 }
 ```
+
+The board cap is a runtime config constant (`MaxBoardMembers = 7`), not a genesis field. The election seats up to that many top-voted candidates, allowing a 5–7 member board depending on turnout.
 
 Note: Genesis balances are empty. No pre-mine. No founder allocation. The mining pool is emitted block-by-block via the mining pallet. The fee pool account is a deterministic keyless account derived from SHA-256 of `"fee_pool"` — a transient buffer that holds settlement fees until distributed to stakers.
 

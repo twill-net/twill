@@ -8,9 +8,12 @@
 #   4. Share your IP + peer ID on the forum so others can connect
 #
 # Usage:
-#   ./scripts/run-node.sh                          # Connect to mainnet (needs bootnodes)
-#   ./scripts/run-node.sh --bootnodes BOOTNODE_URL # Connect via a specific bootnode
+#   ./scripts/run-node.sh                          # Connect to mainnet (uses bootnode in mainnet-raw.json)
+#   ./scripts/run-node.sh --bootnodes BOOTNODE_URL # Add an extra bootnode
 #   BOOTNODE=... ./scripts/run-node.sh             # Set via environment variable
+#
+# The genesis bootnode is embedded in mainnet-raw.json:
+#   /ip4/140.82.10.138/tcp/30333/p2p/12D3KooWGrvFo7bFjgWyVj5boBumVYEQq2Q6VywKht9Pgsz4RUMa
 #
 # Bootnode URL format: /ip4/IP/tcp/30333/p2p/PEER_ID
 
@@ -53,8 +56,8 @@ exec "$BINARY" \
     --base-path "$BASE_PATH" \
     --port "$P2P_PORT" \
     --rpc-port "$RPC_PORT" \
-    --rpc-cors all \
-    --rpc-methods unsafe \
+    --rpc-cors none \
+    --rpc-methods Safe \
     --name "twill-node-$(hostname)" \
     $BOOTNODE_ARG \
     "$@"

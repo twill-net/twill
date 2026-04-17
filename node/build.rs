@@ -1,7 +1,4 @@
 fn main() {
-    #[cfg(feature = "std")]
-    {
-        // Generate build info for the node binary
-        println!("cargo:rerun-if-changed=build.rs");
-    }
+    // Re-run only when build.rs itself changes.
+    println!("cargo:rerun-if-changed=build.rs");
 }

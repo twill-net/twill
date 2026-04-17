@@ -89,7 +89,13 @@ pub fn mainnet_config() -> Result<ChainSpec, String> {
         props.insert("ss58Format".into(), serde_json::json!(42));
         props.into()
     })
-    .with_genesis_config_patch(mainnet_genesis())
+    .with_genesis_config_patch({
+        // Hard sanity check at spec build time. If this ever fails, the binary
+        // refuses to produce a mainnet spec — the operator must fix the
+        // primitives constants and rebuild.
+        assert!(validate_genesis(), "mainnet genesis invariant violated");
+        mainnet_genesis()
+    })
     .build())
 }
 

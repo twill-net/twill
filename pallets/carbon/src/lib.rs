@@ -161,10 +161,16 @@ pub mod pallet {
         CreditNotRetired,
         /// Registry confirmation already recorded for this credit
         AlreadyConfirmed,
+        /// Retirement certificate id collides with an existing certificate.
+        /// Practically unreachable (SHA-256 + monotonic counter), kept as a
+        /// belt-and-braces guard against silent overwrite.
+        DuplicateCertificate,
     }
 
     // -----------------------------------------------------------------------
-    // Extrinsics — ALL permissionless
+    // Extrinsics — issuance, lock, retire, transfer, and bond reclaim are
+    // permissionless. Bond slashing and registry-retirement confirmation are
+    // root-only and reachable only via runtime upgrade (governance proposal).
     // -----------------------------------------------------------------------
 
     #[pallet::call]
@@ -285,6 +291,15 @@ pub mod pallet {
                 let cert_data = (credit_id, who.clone(), amount, now, cert_count);
                 let certificate_id = H256::from_slice(
                     sp_core::hashing::sha2_256(&codec::Encode::encode(&cert_data)).as_ref()
+                );
+
+                // Defensive: a SHA-256 collision with an existing certificate
+                // would otherwise silently overwrite history. The monotonic
+                // CertificateCount makes this effectively impossible, but the
+                // explicit check keeps audit history immutable by construction.
+                ensure!(
+                    !RetirementCertificates::<T>::contains_key(certificate_id),
+                    Error::<T>::DuplicateCertificate
                 );
 
                 RetirementCertificates::<T>::insert(certificate_id, RetirementCert {

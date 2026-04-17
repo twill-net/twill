@@ -120,6 +120,13 @@ pub mod pallet {
     #[pallet::storage]
     pub type SlashCount<T: Config> =
         StorageMap<_, Blake2_128Concat, T::AccountId, u32, ValueQuery>;
+    /// Number of blocks an account has successfully mined.
+    /// Used by governance for sybil-resistant genesis-election gating —
+    /// only addresses that have proven actual hashpower may nominate or
+    /// vote in the first board election.
+    #[pallet::storage]
+    pub type BlocksMinedBy<T: Config> =
+        StorageMap<_, Blake2_128Concat, T::AccountId, u32, ValueQuery>;
 
     pub const DIFFICULTY_ADJUSTMENT_INTERVAL: u64 = 2016;
     pub const INITIAL_DIFFICULTY: [u8; 32] = [
@@ -288,8 +295,11 @@ pub mod pallet {
                 return Ok(PostDispatchInfo { actual_weight: None, pays_fee: Pays::No });
             }
 
+            // Compute treasury share via integer math that cannot overflow:
+            // bps is at most 10_000, so dividing first keeps the product bounded.
             let treasury_bps = MiningTreasuryShareBps::<T>::get() as u128;
-            let treasury_amount = actual_reward.saturating_mul(treasury_bps) / 10_000u128;
+            let treasury_amount = (actual_reward / 10_000u128).saturating_mul(treasury_bps)
+                + ((actual_reward % 10_000u128).saturating_mul(treasury_bps)) / 10_000u128;
             let miner_amount = actual_reward.saturating_sub(treasury_amount);
 
             let miner_balance: BalanceOf<T> = miner_amount
@@ -305,6 +315,7 @@ pub mod pallet {
             TotalMinted::<T>::mutate(|m| *m = m.saturating_add(actual_reward));
             TotalPocRewards::<T>::mutate(|r| *r = r.saturating_add(actual_reward));
             LastPocRewardBlock::<T>::put(now);
+            BlocksMinedBy::<T>::mutate(&miner, |c| *c = c.saturating_add(1));
 
             Self::deposit_event(Event::BlockMined { miner, reward: miner_balance, block_number: now });
 
@@ -405,8 +416,11 @@ pub mod pallet {
                 return Ok(());
             }
 
+            // Compute treasury share via integer math that cannot overflow:
+            // bps is at most 10_000, so dividing first keeps the product bounded.
             let treasury_bps = MiningTreasuryShareBps::<T>::get() as u128;
-            let treasury_amount = actual_reward.saturating_mul(treasury_bps) / 10_000u128;
+            let treasury_amount = (actual_reward / 10_000u128).saturating_mul(treasury_bps)
+                + ((actual_reward % 10_000u128).saturating_mul(treasury_bps)) / 10_000u128;
             let miner_amount = actual_reward.saturating_sub(treasury_amount);
 
             let miner_balance: BalanceOf<T> = miner_amount
@@ -422,6 +436,7 @@ pub mod pallet {
             TotalMinted::<T>::mutate(|m| *m = m.saturating_add(actual_reward));
             TotalPocRewards::<T>::mutate(|r| *r = r.saturating_add(actual_reward));
             LastPocRewardBlock::<T>::put(now);
+            BlocksMinedBy::<T>::mutate(&miner, |c| *c = c.saturating_add(1));
 
             Self::deposit_event(Event::BlockMined { miner, reward: miner_balance, block_number: now });
             Ok(())
@@ -501,6 +516,12 @@ pub mod pallet {
         /// Total TWL minted from the mining pool so far.
         fn total_minted() -> u128 {
             TotalMinted::<T>::get()
+        }
+
+        /// Number of blocks mined by `who`. Used by governance to gate the
+        /// genesis election against sybil attacks.
+        fn blocks_mined_by(who: &T::AccountId) -> u32 {
+            BlocksMinedBy::<T>::get(who)
         }
     }
 

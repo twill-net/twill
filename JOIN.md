@@ -3,23 +3,20 @@
 Mine TWL and earn block rewards. 100% of every block reward goes to the miner.
 No founder allocation. No pre-mine. Zero admin keys.
 
-## Public RPC
+## Connecting
 
-Connect to the live network:
-```
-wss://rider-treaty-rocket-phrases.trycloudflare.com
-```
-
-View chain state in your browser:
-[Polkadot.js Apps → Twill Network](https://polkadot.js.org/apps/?rpc=wss%3A%2F%2Frider-treaty-rocket-phrases.trycloudflare.com)
+Run your own node (recommended). The instructions below build a node from source
+and connect it to the network. Once your node is synced, point Polkadot.js Apps
+at `ws://127.0.0.1:9944` to view chain state.
 
 ---
 
 ## Requirements
 
 - Linux x86_64 or macOS (Apple Silicon or Intel)
-- GPU strongly recommended (SHA256 mining)
-- Node.js 18+ (for the miner script)
+- GPU strongly recommended for actual mining (SHA-256 brute force via WGSL compute shaders — Vulkan, Metal, or DX12)
+- Rust toolchain (to build the node and the GPU miner helper)
+- Node.js 18+ (for the orchestration script)
 - ~2 GB disk space for chain data
 
 ---
@@ -52,7 +49,7 @@ sudo apt-get install -y clang libclang-dev protobuf-compiler
 brew install protobuf
 
 # Clone and build
-git clone <twill-source-repo>
+git clone https://github.com/twill-net/twill
 cd twill
 cargo build --release
 cp target/release/twill ./twill
@@ -60,9 +57,15 @@ cp target/release/twill ./twill
 
 ---
 
-## Step 2 — Download the chainspec
+## Step 2 — Get the chainspec
 
-Download `chainspec-raw.json` from the Twill release page, or if you built from source it's already in the repo root.
+`mainnet-raw.json` is in the repo root if you built from source. Otherwise download it from the Twill release page. This file is the canonical genesis — every node on the network must use the exact same `mainnet-raw.json`.
+
+The genesis bootnode is embedded in `mainnet-raw.json`, so your node discovers peers automatically:
+
+```
+/ip4/140.82.10.138/tcp/30333/p2p/12D3KooWGrvFo7bFjgWyVj5boBumVYEQq2Q6VywKht9Pgsz4RUMa
+```
 
 ---
 
@@ -73,14 +76,15 @@ mkdir -p chain-data
 
 ./twill \
   --base-path ./chain-data \
-  --chain chainspec-raw.json \
+  --chain mainnet-raw.json \
   --rpc-port 9944 \
-  --rpc-cors all \
+  --rpc-cors none \
+  --rpc-methods Safe \
   --no-telemetry \
   --no-prometheus
 ```
 
-Leave this running in one terminal. Your node will sync with the network.
+Leave this running in one terminal. Your node will connect to the genesis bootnode and sync with the network.
 
 ---
 
@@ -110,10 +114,50 @@ npm install @polkadot/api @polkadot/keyring @polkadot/util-crypto
 
 ---
 
-## Step 6 — Start mining
+## Step 6 — Build the GPU helper (recommended)
+
+The miner is split into two parts: the JS script (`scripts/mine.js`) handles
+substrate RPC, settlement-root tracking, signing and submission; the Rust
+helper (`twill-miner`) does the actual SHA-256 brute force on your GPU using a
+WGSL compute shader (works on Vulkan, Metal, DirectX 12).
+
+```bash
+# From the repo root
+cargo build --release -p twill-miner
+```
+
+That produces `target/release/twill-miner`. The JS script auto-detects this
+binary and uses it. Without it, mining falls back to a slow JS CPU loop —
+fine for trying out the dev chain, useless for actually winning blocks at
+mainnet difficulty.
+
+To force CPU-only (e.g. headless server with no GPU):
+
+```bash
+TWILL_MINER=cpu MNEMONIC="your words" node scripts/mine.js
+```
+
+To point at a different miner binary (cross-compiled, custom build):
+
+```bash
+TWILL_MINER_BIN=/path/to/twill-miner MNEMONIC="your words" node scripts/mine.js
+```
+
+---
+
+## Step 7 — Start mining
 
 ```bash
 MNEMONIC="your twelve words here" node scripts/mine.js
+```
+
+You'll see one of:
+
+```
+Engine: gpu (/path/to/target/release/twill-miner)
+Engine: cpu fallback — build the GPU helper for real hashpower:
+          cargo build --release -p twill-miner
+Engine: cpu (forced via TWILL_MINER=cpu)
 ```
 
 **Optional env vars:**
@@ -121,10 +165,10 @@ MNEMONIC="your twelve words here" node scripts/mine.js
 # Mine against your own local node (default)
 RPC=ws://127.0.0.1:9944 MNEMONIC="your words" node scripts/mine.js
 
-# Mine against the public RPC (no local node required)
-RPC=wss://rider-treaty-rocket-phrases.trycloudflare.com MNEMONIC="your words" node scripts/mine.js
+# Mine against any other Twill RPC
+RPC=ws://your-node:9944 MNEMONIC="your words" node scripts/mine.js
 
-LOG_EVERY=5000   # log progress every N hashes (default 10000)
+LOG_EVERY=5000   # log progress every N hashes (default 10000, cpu fallback only)
 ```
 
 You'll see:

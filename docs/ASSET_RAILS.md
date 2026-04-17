@@ -25,19 +25,35 @@ The floor price rises as the network settles more.
 | Bitcoin (BTC) | Bitcoin | Crypto | **Protocol ready** | Oracle nodes + bridge infrastructure |
 | Ethereum (ETH) | Ethereum | Crypto | **Protocol ready** | Oracle nodes + bridge infrastructure |
 | Solana (SOL) | Solana | Crypto | **Protocol ready** | Oracle nodes + bridge infrastructure |
-| USDC | Ethereum | Crypto | **Protocol ready** | Oracle nodes + bridge infrastructure |
+| USDC | Usdc | Crypto | **Protocol ready** | Oracle nodes + bridge infrastructure |
 | Carbon (tCO2e) — Verra | Verra | Carbon | **Protocol ready** | Oracle nodes + Verra registry contact |
 | Carbon (tCO2e) — Gold Standard | GoldStandard | Carbon | **Protocol ready** | Oracle nodes + Gold Standard contact |
-| EUR (SEPA) | Sepa | Fiat | **Governance upgrade** | Community vote to activate + oracle nodes monitoring SEPA confirmations |
-| USD (ACH) | Ach | Fiat | **Governance upgrade** | Community vote to activate + oracle nodes monitoring ACH confirmations |
-| International wire | Swift | Fiat | **Governance upgrade** | Community vote to activate + oracle nodes monitoring SWIFT confirmations |
-| INR (UPI) | Upi | Fiat | **Governance upgrade** | Community vote to activate + oracle nodes monitoring UPI confirmations |
-| GBP (Faster Payments) | Faster | Fiat | **Governance upgrade** | Community vote to activate + oracle nodes monitoring Faster Payments confirmations |
+| EUR (SEPA) | Sepa | Fiat | **Future — community completion** | Future runtime upgrade once community / partner orgs commit to operating SEPA confirmation oracles |
+| USD (ACH) | Ach | Fiat | **Future — community completion** | Future runtime upgrade once community / partner orgs commit to operating ACH confirmation oracles |
+| International wire | Swift | Fiat | **Future — community completion** | Future runtime upgrade once community / partner orgs commit to operating SWIFT confirmation oracles |
+| INR (UPI) | Upi | Fiat | **Future — community completion** | Future runtime upgrade once community / partner orgs commit to operating UPI confirmation oracles |
+| GBP (Faster Payments) | Faster | Fiat | **Future — community completion** | Future runtime upgrade once community / partner orgs commit to operating Faster Payments confirmation oracles |
 
 **"Protocol ready"** means the settlement engine, oracle pallet, and reserve pallet are
 fully implemented and compiled. The on-chain code is complete. The off-chain infrastructure
 (oracles submitting prices, bridges confirming external transactions) must be stood up by
 the community and board.
+
+**"Future — community completion"** means the rail variant exists in the runtime as
+scaffolding, but is not part of the launch surface. Activation is intentionally
+deferred to whenever community organisations, payment partners, or contributors
+take ownership of the off-chain leg. No timeline is committed. Fiat is opt-in by
+the network, not promised.
+
+### Adding a new reserve asset
+
+The first-class reserve assets at launch are **BTC, ETH, SOL, USDC, and on-chain
+Carbon credits**. The reserve pallet also exposes an `Other` bucket so the
+Assets-pallet bridge can wrap and hold additional assets without code changes.
+Promoting a new asset to a first-class reserve (its own `RailKind`,
+`AssetPair`, and `ReserveAssetKind` variant) is a runtime upgrade — proposed
+and voted on through community governance. There is no admin shortcut; the
+upgrade ships, gets reviewed publicly, and the board votes.
 
 ---
 
@@ -236,16 +252,13 @@ value is publicly auditable on-chain at all times via `pallet_reserve::TotalRese
 
 ---
 
-## Security Note: ForceOrigin on Assets Pallet
+## Privileged Origins
 
-Auditors will find one `ForceOrigin = EnsureRoot` in the runtime — on the **Assets pallet only**, which manages bridge-wrapped assets (wBTC, wETH, wUSDC). This is a custodial bridge admin key for Phase 1, required to mint/burn wrapped asset representations when the custodial bridge processes deposits and withdrawals.
+There is no `sudo` pallet. There is no foundation key. The chain has no human admin.
 
-**What it controls:** Only the Assets pallet — creation and management of wrapped asset tokens.
-**What it cannot do:** It has no access to settlement logic, staked funds, mining rewards, the treasury, the fee pool, or the reserve vault. It cannot pause the chain, cancel settlements, or modify governance.
+A small number of extrinsics — bridge relayer registration, carbon bond slashing, reserve redemption fulfillment, and wrapped-asset management on the Assets pallet — are gated behind `EnsureRoot`. The only path to `EnsureRoot` is a runtime upgrade, and runtime upgrades are themselves community governance proposals voted on by the on-chain board. There is no shortcut.
 
-This key is a known Phase 1 trust assumption. Phase 2 replaces it with a trustless bridge (e.g. threshold-signature multisig or light-client proof). The community should treat it as a temporary custodial risk and prioritize the Phase 2 trustless bridge upgrade.
-
-**The settlement pallets, mining pallet, and governance pallet have zero privileged origins.** All calls require a signed user account or are triggered automatically by the protocol itself.
+The settlement pallet, mining pallet, oracle pallet, and governance pallet itself have **no privileged origins**. Every call there is signed by an ordinary user account or triggered automatically by the protocol on each block.
 
 ---
 
@@ -259,8 +272,8 @@ This key is a known Phase 1 trust assumption. Phase 2 replaces it with a trustle
 | 4 | Deploy custodial BTC bridge | BTC ↔ TWL and BTC ↔ Carbon settlements |
 | 5 | Deploy custodial ETH/USDC bridge | ETH ↔ TWL and ETH ↔ Carbon settlements |
 | 6 | First live carbon registry settlement | Institutional credibility, partnership proof |
-| 7 | Governance vote to activate fiat rails (SEPA, ACH, etc.) | Fiat ↔ TWL ↔ Carbon cross-border settlements |
-| 8 | Transition to trustless MPC bridges | Full decentralization of reserve custody |
+| 7 | Transition to trustless MPC bridges | Full decentralization of reserve custody |
+| — (future) | Community / partner orgs complete a fiat rail (SEPA, ACH, etc.) and propose runtime upgrade | Fiat ↔ TWL ↔ Carbon cross-border settlements |
 
 Each activation is a governance proposal + community vote. The protocol is ready.
 The community decides when and how to activate each rail.

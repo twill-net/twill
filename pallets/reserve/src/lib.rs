@@ -18,7 +18,7 @@ pub use pallet::*;
 pub mod pallet {
     use frame_support::{
         pallet_prelude::*,
-        traits::{Currency, ExistenceRequirement, ReservableCurrency},
+        traits::{Currency, ReservableCurrency},
     };
     use frame_system::pallet_prelude::*;
     use sp_core::H256;
@@ -168,7 +168,11 @@ pub mod pallet {
             asset_amount: u128,
         },
         /// Redemption cancelled — TWL returned to holder.
+        /// The requester cancelled their own pending redemption.
         RedemptionCancelled { request_id: u64, who: T::AccountId, twl_returned: BalanceOf<T> },
+        /// Governance (root-origin via runtime upgrade) cancelled a pending
+        /// redemption — typically because the off-chain transfer is impossible.
+        RedemptionForceCancelled { request_id: u64, who: T::AccountId, twl_returned: BalanceOf<T> },
     }
 
     #[pallet::error]
@@ -279,6 +283,7 @@ pub mod pallet {
                     ReserveAssetKind::BTC  => Some(AssetPair::BtcTwl),
                     ReserveAssetKind::ETH  => Some(AssetPair::EthTwl),
                     ReserveAssetKind::SOL  => Some(AssetPair::SolTwl),
+                    ReserveAssetKind::USDC => Some(AssetPair::UsdcTwl),
                     ReserveAssetKind::CarbonCredit => Some(AssetPair::CarbonTwl),
                     ReserveAssetKind::Other => None,
                 };
@@ -392,13 +397,22 @@ pub mod pallet {
             T::Currency::unreserve(&request.who, twl_returned);
 
             request.status = RedemptionStatus::Cancelled;
+            let who = request.who.clone();
             RedemptionRequests::<T>::insert(request_id, &request);
 
-            Self::deposit_event(Event::RedemptionCancelled {
-                request_id,
-                who: request.who,
-                twl_returned,
-            });
+            if is_root {
+                Self::deposit_event(Event::RedemptionForceCancelled {
+                    request_id,
+                    who,
+                    twl_returned,
+                });
+            } else {
+                Self::deposit_event(Event::RedemptionCancelled {
+                    request_id,
+                    who,
+                    twl_returned,
+                });
+            }
 
             Ok(())
         }
@@ -489,6 +503,7 @@ pub mod pallet {
                 ReserveAssetKind::BTC,
                 ReserveAssetKind::ETH,
                 ReserveAssetKind::SOL,
+                ReserveAssetKind::USDC,
                 ReserveAssetKind::CarbonCredit,
                 ReserveAssetKind::Other,
             ];
@@ -510,6 +525,7 @@ pub mod pallet {
                 ReserveAssetKind::BTC => Some(AssetPair::BtcTwl),
                 ReserveAssetKind::ETH => Some(AssetPair::EthTwl),
                 ReserveAssetKind::SOL => Some(AssetPair::SolTwl),
+                ReserveAssetKind::USDC => Some(AssetPair::UsdcTwl),
                 ReserveAssetKind::CarbonCredit => Some(AssetPair::CarbonTwl),
                 ReserveAssetKind::Other => None,
             };
@@ -527,14 +543,24 @@ pub mod pallet {
             0
         }
 
-        pub fn composition() -> (u16, u16, u16, u16) {
+        /// Returns reserve composition as basis points per first-class asset:
+        /// (BTC, ETH, SOL, USDC, CarbonCredit). The `Other` bucket is excluded
+        /// from the tuple — it can be inspected directly via `ReserveByAsset`.
+        pub fn composition() -> (u16, u16, u16, u16, u16) {
             let total = TotalReserveValue::<T>::get();
-            if total == 0 { return (0, 0, 0, 0); }
-            let to_bps = |v: u128| -> u16 { ((v.saturating_mul(10_000)) / total) as u16 };
+            if total == 0 { return (0, 0, 0, 0, 0); }
+            // bps is mathematically bounded by 10_000 because v <= total, but
+            // we clamp explicitly so the u16 cast can never silently truncate
+            // even if a future change to total accounting introduces drift.
+            let to_bps = |v: u128| -> u16 {
+                let bps = v.saturating_mul(10_000) / total;
+                bps.min(10_000) as u16
+            };
             (
                 to_bps(ReserveByAsset::<T>::get(ReserveAssetKind::BTC)),
                 to_bps(ReserveByAsset::<T>::get(ReserveAssetKind::ETH)),
                 to_bps(ReserveByAsset::<T>::get(ReserveAssetKind::SOL)),
+                to_bps(ReserveByAsset::<T>::get(ReserveAssetKind::USDC)),
                 to_bps(ReserveByAsset::<T>::get(ReserveAssetKind::CarbonCredit)),
             )
         }

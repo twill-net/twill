@@ -12,6 +12,7 @@ members = [
     "pallets/governance",
     "pallets/bridge",
     "primitives",
+    "miner",
 ]
 
 [workspace.package]

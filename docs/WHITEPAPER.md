@@ -336,10 +336,11 @@ The Reserve Vault accepts the following asset classes, valued via decentralized 
 | Wrapped Bitcoin | Hard-asset reserve | BTC/TWL | wBTC (Asset ID 1) |
 | Wrapped Ethereum | Crypto reserve | ETH/TWL | wETH (Asset ID 2) |
 | Wrapped USDC | Stablecoin reserve | USDC/TWL | wUSDC (Asset ID 3) |
+| Wrapped Solana | Crypto reserve | SOL/TWL | wSOL (Asset ID 4) |
 | Carbon credits | Environmental backing | Carbon/TWL | Verified carbon offsets |
 | Settlement fees | Organic reserve growth | — | TWL-denominated fees |
 
-The composition of the reserve is tracked per asset kind and reported on-chain. Concentration limits prevent over-exposure to any single asset type.
+The composition of the reserve is tracked per asset kind and reported on-chain. Concentration limits prevent over-exposure to any single asset type. Promoting any new asset to first-class reserve status is a runtime upgrade decided by community governance — additional assets can be wrapped in the meantime via the `Other` reserve bucket.
 
 ---
 
