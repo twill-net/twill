@@ -3,8 +3,8 @@
 // Each invocation builds a candidate nonce by mixing the host-supplied 32-byte
 // nonce_base with its global invocation index, then hashes
 // SHA256(nonce || settlement_root || parent_hash) and compares the digest
-// (treated as a big-endian 256-bit integer) against `target`. The first
-// invocation to find a digest < target writes its candidate nonce into
+// (treated as a big-endian 256-bit integer) against `threshold`. The first
+// invocation to find a digest < threshold writes its candidate nonce into
 // `out_nonce` via an atomic flag.
 //
 // Input layout (`Params`):
@@ -12,16 +12,15 @@
 //                                 spliced into the LAST 8 bytes.
 //   settlement_root  : 32 bytes
 //   parent_hash      : 32 bytes
-//   target_hi/lo     : two u32 pairs forming the 256-bit difficulty target,
-//                      stored as 8 big-endian u32 words for direct comparison
-//                      against the digest words.
+//   threshold        : 8 big-endian u32 words forming the 256-bit difficulty
+//                      threshold, for direct comparison against the digest.
 //   start            : u64 starting counter (split into two u32 for WGSL).
 
 struct Params {
     nonce_base: array<u32, 8>,
     settlement_root: array<u32, 8>,
     parent_hash: array<u32, 8>,
-    target: array<u32, 8>,
+    threshold: array<u32, 8>,
     start_lo: u32,
     start_hi: u32,
     _pad0: u32,
@@ -126,11 +125,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     blk1[15] = 768u; // 96 bytes * 8 = 768 bits
     sha256_compress(&state, &blk1);
 
-    // Big-endian compare of state (8 words) vs target (8 words).
+    // Big-endian compare of state (8 words) vs threshold (8 words).
     var winner: bool = false;
     for (var i = 0u; i < 8u; i = i + 1u) {
-        if (state[i] < params.target[i]) { winner = true; break; }
-        if (state[i] > params.target[i]) { break; }
+        if (state[i] < params.threshold[i]) { winner = true; break; }
+        if (state[i] > params.threshold[i]) { break; }
     }
 
     if (winner) {
