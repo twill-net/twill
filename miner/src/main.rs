@@ -99,7 +99,7 @@ impl Gpu {
                     binding: 0,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
                         has_dynamic_offset: false,
                         min_binding_size: None,
                     },
@@ -170,7 +170,7 @@ impl Gpu {
         let params_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("params"),
             contents: bytemuck::bytes_of(&params),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
         });
 
         let flag_buf = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

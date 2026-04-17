@@ -27,7 +27,7 @@ struct Params {
     _pad1: u32,
 };
 
-@group(0) @binding(0) var<uniform> params: Params;
+@group(0) @binding(0) var<storage, read> params: Params;
 @group(0) @binding(1) var<storage, read_write> found_flag: atomic<u32>;
 @group(0) @binding(2) var<storage, read_write> out_nonce: array<u32, 8>;
 
