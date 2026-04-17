@@ -1,0 +1,1 @@
+../../docs/TECHNICAL_SPEC.md

@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Twill Network — Status</title>
+<meta name="description" content="Live network status for Twill Network. Latest block, genesis hash, peer count." />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0f1117;
+    --panel: #161a23;
+    --border: #262b36;
+    --text: #dce3ef;
+    --muted: #7e8796;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --err: #f87171;
+    --accent: #60a5fa;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font: 15px/1.55 system-ui, -apple-system, Helvetica, Arial, sans-serif; }
+  main { max-width: 780px; margin: 2.5rem auto; padding: 0 1.25rem; }
+  h1 { font-size: 1.5rem; margin: 0 0 0.25rem; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); margin: 0 0 2rem; font-size: 0.95rem; }
+  .sub a { color: var(--accent); text-decoration: none; }
+  .sub a:hover { text-decoration: underline; }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem 1.4rem; margin-bottom: 1rem; }
+  .row { display: grid; grid-template-columns: 180px 1fr; gap: 1rem; padding: 0.45rem 0; align-items: baseline; border-bottom: 1px solid var(--border); }
+  .row:last-child { border-bottom: 0; }
+  .label { color: var(--muted); font-size: 0.88rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .value { font-family: var(--mono); font-size: 0.95rem; word-break: break-all; }
+  .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; margin-right: 0.5rem; }
+  .dot-ok { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .dot-warn { background: var(--warn); }
+  .dot-err { background: var(--err); }
+  .dot-idle { background: var(--muted); }
+  .hint { color: var(--muted); font-size: 0.88rem; margin-top: 1.25rem; line-height: 1.55; }
+  .hint code { background: rgba(255,255,255,0.06); padding: 0.1em 0.4em; border-radius: 4px; font-size: 0.85em; }
+  .rpc-input { width: 100%; padding: 0.55rem 0.75rem; background: #0b0d13; border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: var(--mono); font-size: 0.9rem; }
+  footer { color: var(--muted); font-size: 0.8rem; margin-top: 2rem; text-align: center; }
+  footer a { color: var(--accent); text-decoration: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Twill Network — Status</h1>
+  <p class="sub">Live chain metrics. Powered by JSON-RPC over WebSocket. <a href="./index.html">Docs</a> · <a href="https://github.com/twill-net/twill">GitHub</a></p>
+
+  <div class="card">
+    <div class="row">
+      <div class="label">Connection</div>
+      <div class="value" id="conn-state"><span class="status-dot dot-idle"></span>connecting…</div>
+    </div>
+    <div class="row">
+      <div class="label">RPC Endpoint</div>
+      <div class="value" id="rpc-endpoint">—</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <div class="label">Latest Block</div>
+      <div class="value" id="latest-block">—</div>
+    </div>
+    <div class="row">
+      <div class="label">Latest Block Hash</div>
+      <div class="value" id="latest-hash">—</div>
+    </div>
+    <div class="row">
+      <div class="label">Genesis Hash</div>
+      <div class="value" id="genesis-hash">—</div>
+    </div>
+    <div class="row">
+      <div class="label">Chain</div>
+      <div class="value" id="chain-name">—</div>
+    </div>
+    <div class="row">
+      <div class="label">Node Version</div>
+      <div class="value" id="node-version">—</div>
+    </div>
+    <div class="row">
+      <div class="label">Peers</div>
+      <div class="value" id="peers">—</div>
+    </div>
+    <div class="row">
+      <div class="label">Syncing</div>
+      <div class="value" id="syncing">—</div>
+    </div>
+  </div>
+
+  <p class="hint">
+    Pass <code>?rpc=ws://host:port</code> to connect to any Twill RPC endpoint. Running your own node? The page defaults to <code>ws://127.0.0.1:9944</code>.
+    If you want a public RPC, see the <a href="./bootnode.html">bootnode runbook</a> or ask in <a href="https://discord.gg/waRhYDFn">Discord</a>.
+  </p>
+
+  <p class="hint">
+    <input id="rpc-input" class="rpc-input" placeholder="ws://127.0.0.1:9944" />
+  </p>
+
+  <footer>
+    Twill Network — no foundation, no pre-mine, no admin keys. Genesis <code>0xeee3…6b80</code>.
+  </footer>
+</main>
+
+<script>
+(() => {
+  const EXPECTED_GENESIS = "0xeee371ca0add91bbe73874d7b3643f1731584c0708856e11f2e0fc752a0c6b80";
+  const DEFAULT_RPC = "ws://127.0.0.1:9944";
+  const q = new URLSearchParams(location.search);
+  const endpoint = (q.get("rpc") || DEFAULT_RPC).trim();
+
+  const el = (id) => document.getElementById(id);
+  el("rpc-endpoint").textContent = endpoint;
+  el("rpc-input").value = endpoint;
+
+  el("rpc-input").addEventListener("change", (e) => {
+    const v = e.target.value.trim();
+    if (!v) return;
+    location.search = "?rpc=" + encodeURIComponent(v);
+  });
+
+  const setConn = (cls, text) => {
+    el("conn-state").innerHTML = `<span class="status-dot ${cls}"></span>${text}`;
+  };
+
+  let ws;
+  let idCounter = 1;
+  const pending = new Map();
+  const subs = new Map();
+
+  const call = (method, params = []) => new Promise((resolve, reject) => {
+    const id = idCounter++;
+    pending.set(id, { resolve, reject });
+    ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+    setTimeout(() => {
+      if (pending.has(id)) {
+        pending.delete(id);
+        reject(new Error("timeout"));
+      }
+    }, 10_000);
+  });
+
+  const subscribe = (method, params, onNotif) => new Promise(async (resolve, reject) => {
+    try {
+      const subId = await call(method, params);
+      subs.set(subId, onNotif);
+      resolve(subId);
+    } catch (e) { reject(e); }
+  });
+
+  const connect = () => {
+    setConn("dot-idle", "connecting…");
+    try { ws = new WebSocket(endpoint); } catch (e) {
+      setConn("dot-err", "invalid RPC URL");
+      return;
+    }
+
+    ws.addEventListener("open", async () => {
+      setConn("dot-ok", "connected");
+      try {
+        const [chain, version, genesis, health] = await Promise.all([
+          call("system_chain"),
+          call("system_version"),
+          call("chain_getBlockHash", [0]),
+          call("system_health"),
+        ]);
+        el("chain-name").textContent = chain;
+        el("node-version").textContent = version;
+        const gMatch = genesis?.toLowerCase() === EXPECTED_GENESIS.toLowerCase();
+        el("genesis-hash").innerHTML = `<span class="status-dot ${gMatch ? "dot-ok" : "dot-err"}"></span>${genesis}${gMatch ? "" : " (mismatch!)"}`;
+        el("peers").textContent = health.peers ?? "—";
+        el("syncing").innerHTML = health.isSyncing
+          ? `<span class="status-dot dot-warn"></span>syncing`
+          : `<span class="status-dot dot-ok"></span>in sync`;
+
+        const header = await call("chain_getHeader");
+        updateHead(header);
+
+        await subscribe("chain_subscribeNewHeads", [], updateHead);
+
+        setInterval(async () => {
+          try {
+            const h = await call("system_health");
+            el("peers").textContent = h.peers ?? "—";
+            el("syncing").innerHTML = h.isSyncing
+              ? `<span class="status-dot dot-warn"></span>syncing`
+              : `<span class="status-dot dot-ok"></span>in sync`;
+          } catch {}
+        }, 5_000);
+      } catch (e) {
+        setConn("dot-err", "error: " + e.message);
+      }
+    });
+
+    ws.addEventListener("message", (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.id !== undefined && pending.has(msg.id)) {
+        const { resolve, reject } = pending.get(msg.id);
+        pending.delete(msg.id);
+        if (msg.error) reject(new Error(msg.error.message || "rpc error"));
+        else resolve(msg.result);
+        return;
+      }
+      if (msg.method && msg.params?.subscription) {
+        const fn = subs.get(msg.params.subscription);
+        if (fn) fn(msg.params.result);
+      }
+    });
+
+    ws.addEventListener("close", () => {
+      setConn("dot-err", "disconnected — retrying in 3s");
+      setTimeout(connect, 3_000);
+    });
+
+    ws.addEventListener("error", () => {
+      setConn("dot-err", "connection error");
+    });
+  };
+
+  const updateHead = (header) => {
+    if (!header) return;
+    const num = parseInt(header.number, 16);
+    el("latest-block").textContent = "#" + num.toLocaleString();
+    el("latest-hash").textContent = header.parentHash
+      ? "…" // placeholder; real hash on next chain_getBlockHash
+      : "";
+    // Fetch the actual block hash by number for display.
+    call("chain_getBlockHash", [num]).then((h) => {
+      el("latest-hash").textContent = h || "—";
+    }).catch(() => {});
+  };
+
+  connect();
+})();
+</script>
+</body>
+</html>

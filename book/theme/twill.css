@@ -1,0 +1,35 @@
+/* Twill Network — minor mdBook tweaks. Keep it restrained. */
+
+:root {
+    --sidebar-width: 280px;
+}
+
+.sidebar .sidebar-scrollbox {
+    padding-top: 1rem;
+}
+
+.chapter li.chapter-item {
+    line-height: 1.5;
+    padding: 0.15rem 0;
+}
+
+/* Monospace inline code a hair smaller so it sits well in prose. */
+code {
+    font-size: 0.92em;
+}
+
+/* Tables: tighter, readable. */
+table {
+    margin: 1em 0;
+}
+
+table thead td {
+    font-weight: 600;
+}
+
+/* Block quotes as callouts. */
+blockquote {
+    border-left: 3px solid var(--links);
+    padding: 0.5em 1em;
+    opacity: 0.95;
+}

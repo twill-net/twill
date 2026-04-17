@@ -1,0 +1,1 @@
+../../docs/COMMUNITY_BOARD_CHECKLIST.md
