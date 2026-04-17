@@ -16,6 +16,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+          components: rust-src
 
       - name: Install system deps
         run: |
@@ -48,6 +49,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32-unknown-unknown
+          components: rust-src
 
       - name: Install system deps
         run: brew install protobuf
@@ -86,7 +88,7 @@ jobs:
           files: |
             twill-linux-x86_64/twill-linux-x86_64
             twill-macos-arm64/twill-macos-arm64
-            chainspec-raw.json
+            mainnet-raw.json
           body: |
             ## Twill Network ${{ github.ref_name }}
 
@@ -96,10 +98,8 @@ jobs:
             ### Downloads
             - `twill-linux-x86_64` — Linux x86_64 node binary
             - `twill-macos-arm64` — macOS Apple Silicon node binary
-            - `chainspec-raw.json` — Chain specification (required)
+            - `mainnet-raw.json` — Chain specification (required)
 
-            ### Verify
-            sha256 checksums:
-            ```
-            $(sha256sum twill-linux-x86_64/twill-linux-x86_64 twill-macos-arm64/twill-macos-arm64 chainspec-raw.json)
-            ```
+            ### Genesis bootnode
+            `/ip4/140.82.10.138/tcp/30333/p2p/12D3KooWGrvFo7bFjgWyVj5boBumVYEQq2Q6VywKht9Pgsz4RUMa`
+            (embedded in `mainnet-raw.json` — your node discovers it automatically)
