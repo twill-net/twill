@@ -31,7 +31,7 @@ struct Params {
 @group(0) @binding(1) var<storage, read_write> found_flag: atomic<u32>;
 @group(0) @binding(2) var<storage, read_write> out_nonce: array<u32, 8>;
 
-const K: array<u32, 64> = array<u32, 64>(
+var<private> K: array<u32, 64> = array<u32, 64>(
     0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u,
     0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
     0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u,
