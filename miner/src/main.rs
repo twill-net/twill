@@ -41,8 +41,9 @@ struct Params {
 #[command(version, about = "Twill GPU PoC miner helper. Reads jobs from stdin.")]
 struct Args {
     /// Workgroup count per dispatch. Each workgroup is 64 invocations.
-    /// Total per-dispatch search width = workgroups * 64.
-    #[arg(long, default_value_t = 65_536)]
+    /// Total per-dispatch search width = workgroups * 64. The GPU dispatch
+    /// dimension cap is 65_535; stay under it.
+    #[arg(long, default_value_t = 32_768)]
     workgroups: u32,
     /// Self-test: run a known-answer SHA-256 vector before serving jobs.
     #[arg(long, default_value_t = true)]
