@@ -133,9 +133,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     if (winner) {
-        // First finder wins; later writes are skipped.
-        let prev = atomicCompareExchangeWeak(&found_flag, 0u, 1u);
-        if (prev.exchanged) {
+        // First finder wins; later writes are skipped. Metal/MSL backend
+        // lacks atomicCompareExchange — atomicExchange gives us the same
+        // "first one in" semantics by returning the previous flag value.
+        let prev = atomicExchange(&found_flag, 1u);
+        if (prev == 0u) {
             for (var i = 0u; i < 8u; i = i + 1u) {
                 out_nonce[i] = nonce[i];
             }
