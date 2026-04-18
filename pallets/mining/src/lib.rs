@@ -606,10 +606,20 @@ pub mod pallet {
                     let _ = T::Currency::transfer(&fee_pool, v, r, ExistenceRequirement::KeepAlive);
                 }
             } else {
+                // `amount * stake` can exceed u128 worst-case (both near supply cap).
+                // Promote to U256 for the multiply, then divide back into u128.
+                let wide_amount = sp_core::U256::from(amount);
+                let wide_total = sp_core::U256::from(total_stake);
                 for v in validators.iter() {
                     if let Some(val) = PoseValidators::<T>::get(v) {
                         let stake: u128 = val.stake.try_into().unwrap_or(0u128);
-                        let share = amount.saturating_mul(stake) / total_stake;
+                        let wide_share = wide_amount
+                            .saturating_mul(sp_core::U256::from(stake)) / wide_total;
+                        let share: u128 = if wide_share > sp_core::U256::from(u128::MAX) {
+                            u128::MAX
+                        } else {
+                            wide_share.low_u128()
+                        };
                         let r: BalanceOf<T> = share.try_into().unwrap_or_else(|_| BalanceOf::<T>::max_value());
                         let _ = T::Currency::transfer(&fee_pool, v, r, ExistenceRequirement::KeepAlive);
                     }
@@ -674,6 +684,9 @@ pub mod pallet {
         /// Bitcoin-style difficulty retarget — fires every DIFFICULTY_ADJUSTMENT_INTERVAL blocks.
         /// Compares actual wall-clock time against expected time and scales the target accordingly.
         /// Clamped to [expected/4, expected*4] (same as Bitcoin). Works on upper 16 bytes of H256.
+        ///
+        /// Delegates the pure math to [`compute_retarget`] so it can be unit-tested
+        /// without needing a runtime.
         fn adjust_difficulty(now: BlockNumberFor<T>) {
             let old_difficulty = PocDifficulty::<T>::get()
                 .unwrap_or_else(|| H256::from(INITIAL_DIFFICULTY));
@@ -692,32 +705,11 @@ pub mod pallet {
             let expected_ms = DIFFICULTY_ADJUSTMENT_INTERVAL
                 .saturating_mul(twill_primitives::BLOCK_TIME_MS);
 
-            // Clamp to [expected/4, expected*4]
-            let clamped_ms = actual_ms.max(expected_ms / 4).min(expected_ms * 4);
-
-            // Work in u128 using the upper 16 bytes (big-endian) of H256
-            let old_bytes: [u8; 16] = old_difficulty.as_bytes()[..16]
-                .try_into().unwrap_or([0xFF; 16]);
-            let old_u128 = u128::from_be_bytes(old_bytes);
-
-            // new_target = old_target * actual_time / expected_time
-            // Larger target = easier; smaller target = harder
-            let new_u128 = (old_u128 as u128)
-                .saturating_mul(clamped_ms as u128)
-                .checked_div(expected_ms as u128)
-                .unwrap_or(old_u128);
-
-            let initial_bytes: [u8; 16] = INITIAL_DIFFICULTY[..16]
-                .try_into().unwrap_or([0xFF; 16]);
-            let initial_u128 = u128::from_be_bytes(initial_bytes);
-
-            // Clamp: cannot be easier than genesis target, cannot be zero
-            let new_u128 = new_u128.max(1).min(initial_u128);
-
-            let mut new_bytes = [0u8; 32];
-            new_bytes[..16].copy_from_slice(&new_u128.to_be_bytes());
-            // Lower 16 bytes = 0xFF — they don't constrain the comparison
-            new_bytes[16..].copy_from_slice(&[0xFF; 16]);
+            let new_bytes = compute_retarget(
+                old_difficulty.as_bytes().try_into().unwrap_or([0xFFu8; 32]),
+                actual_ms,
+                expected_ms,
+            );
             let new_difficulty = H256::from(new_bytes);
 
             PocDifficulty::<T>::put(new_difficulty);
@@ -743,5 +735,153 @@ pub mod pallet {
         pub fn total_minted() -> u128 { TotalMinted::<T>::get() }
         pub fn remaining_pool() -> u128 { MINING_POOL.saturating_sub(TotalMinted::<T>::get()) }
         pub fn epoch() -> u32 { CurrentEpoch::<T>::get() }
+    }
+
+    /// Pure difficulty retarget math — no storage, no runtime. Extracted so
+    /// `adjust_difficulty` stays a thin storage shim around this, and so we can
+    /// hammer it with unit tests. See the `tests` module at the bottom of this
+    /// file for the overflow regression coverage.
+    ///
+    /// Semantics (Bitcoin-style):
+    ///   new_target = old_target * clamp(actual, [expected/4, expected*4]) / expected
+    /// then clamped to `(0, INITIAL_DIFFICULTY_U128]`, operating on the upper
+    /// 16 bytes of the H256 target. Returned bytes always have the low 16 bytes
+    /// set to 0xFF (they don't constrain the comparison in `hash < target`).
+    ///
+    /// Multiplication is done in U256 because the 16-byte target scaled by the
+    /// clamped-ms window exceeds u128 range near the initial target.
+    pub(crate) fn compute_retarget(
+        old_bytes: [u8; 32],
+        actual_ms: u64,
+        expected_ms: u64,
+    ) -> [u8; 32] {
+        // Defensive: never divide by zero, never clamp to a negative window.
+        let expected_ms = expected_ms.max(1);
+        let clamped_ms = actual_ms
+            .max(expected_ms / 4)
+            .min(expected_ms.saturating_mul(4));
+
+        let old_u128 = u128::from_be_bytes(
+            old_bytes[..16].try_into().unwrap_or([0xFFu8; 16])
+        );
+
+        let wide_old = sp_core::U256::from(old_u128);
+        let wide_num = wide_old
+            .saturating_mul(sp_core::U256::from(clamped_ms as u128));
+        let wide_new = wide_num / sp_core::U256::from(expected_ms as u128);
+        let new_u128: u128 = if wide_new > sp_core::U256::from(u128::MAX) {
+            u128::MAX
+        } else {
+            wide_new.low_u128()
+        };
+
+        let initial_u128 = u128::from_be_bytes(
+            INITIAL_DIFFICULTY[..16].try_into().unwrap_or([0xFFu8; 16])
+        );
+        // Cannot be easier than genesis, cannot be zero.
+        let new_u128 = new_u128.max(1).min(initial_u128);
+
+        let mut out = [0u8; 32];
+        out[..16].copy_from_slice(&new_u128.to_be_bytes());
+        out[16..].copy_from_slice(&[0xFFu8; 16]);
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::pallet::{
+        compute_retarget, DIFFICULTY_ADJUSTMENT_INTERVAL, INITIAL_DIFFICULTY,
+    };
+    use twill_primitives::BLOCK_TIME_MS;
+
+    const EXPECTED_MS: u64 = DIFFICULTY_ADJUSTMENT_INTERVAL * BLOCK_TIME_MS;
+
+    fn upper_u128(b: [u8; 32]) -> u128 {
+        u128::from_be_bytes(b[..16].try_into().unwrap())
+    }
+
+    fn initial_u128() -> u128 {
+        u128::from_be_bytes(INITIAL_DIFFICULTY[..16].try_into().unwrap())
+    }
+
+    /// With actual == expected the retarget should be a bit-exact no-op.
+    /// This also exercises the U256 path at the initial target where naive
+    /// u128 multiplication would overflow.
+    #[test]
+    fn retarget_at_initial_difficulty_with_on_time_blocks_is_identity() {
+        let out = compute_retarget(INITIAL_DIFFICULTY, EXPECTED_MS, EXPECTED_MS);
+        // Should equal initial to the bit (actual == expected).
+        assert_eq!(upper_u128(out), initial_u128());
+    }
+
+    /// Slow blocks -> easier target, but we can't go easier than genesis
+    /// because the whole chain would be softer than its floor. `min(initial)`
+    /// clamp must engage.
+    #[test]
+    fn retarget_clamps_to_initial_when_blocks_are_slow() {
+        // 4x slower than expected.
+        let out = compute_retarget(INITIAL_DIFFICULTY, EXPECTED_MS * 4, EXPECTED_MS);
+        assert_eq!(upper_u128(out), initial_u128(),
+            "retarget must clamp to initial difficulty ceiling");
+    }
+
+    /// Fast blocks -> harder target. Genesis / 4 on lower clamp.
+    #[test]
+    fn retarget_halves_properly_when_blocks_are_fast() {
+        // Half the expected time. new_target = old / 2.
+        let out = compute_retarget(INITIAL_DIFFICULTY, EXPECTED_MS / 2, EXPECTED_MS);
+        let got = upper_u128(out);
+        let expected = initial_u128() / 2;
+        // Allow ±1 for integer-division rounding.
+        assert!(got.abs_diff(expected) <= 1,
+            "expected ~{}, got {}", expected, got);
+    }
+
+    /// Out-of-window actual values must be clamped to [expected/4, expected*4].
+    #[test]
+    fn retarget_lower_clamps_absurdly_fast_blocks() {
+        // 1000x faster than expected — must be treated as only 4x faster.
+        let fast = compute_retarget(INITIAL_DIFFICULTY, 1, EXPECTED_MS);
+        let four_x = compute_retarget(INITIAL_DIFFICULTY, EXPECTED_MS / 4, EXPECTED_MS);
+        assert_eq!(upper_u128(fast), upper_u128(four_x));
+    }
+
+    #[test]
+    fn retarget_upper_clamps_absurdly_slow_blocks() {
+        // 1000x slower — must be treated as only 4x slower (and then min-clamped
+        // to genesis ceiling).
+        let slow = compute_retarget(INITIAL_DIFFICULTY, EXPECTED_MS * 1000, EXPECTED_MS);
+        assert_eq!(upper_u128(slow), initial_u128());
+    }
+
+    /// Repeated halving over many retargets must stay within bounds at
+    /// every step — no overflow to u128::MAX, no drop to zero.
+    #[test]
+    fn repeated_retargets_never_overflow_or_zero() {
+        let mut cur = INITIAL_DIFFICULTY;
+        for _ in 0..64 {
+            cur = compute_retarget(cur, EXPECTED_MS / 2, EXPECTED_MS);
+            let v = upper_u128(cur);
+            assert!(v >= 1, "difficulty dropped to zero");
+            assert!(v <= initial_u128(), "difficulty exceeded genesis ceiling");
+        }
+    }
+
+    /// expected_ms = 0 must not panic (we saturate it to 1 internally).
+    #[test]
+    fn retarget_is_panic_free_on_zero_expected() {
+        let out = compute_retarget(INITIAL_DIFFICULTY, EXPECTED_MS, 0);
+        let v = upper_u128(out);
+        assert!(v >= 1);
+    }
+
+    /// Low 16 bytes of the returned target are always 0xFF.
+    #[test]
+    fn retarget_preserves_low_bytes_as_ff() {
+        let out = compute_retarget(INITIAL_DIFFICULTY, EXPECTED_MS, EXPECTED_MS);
+        for i in 16..32 {
+            assert_eq!(out[i], 0xFF);
+        }
     }
 }
