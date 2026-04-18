@@ -379,8 +379,12 @@ pub mod pallet {
 
     /// One era in blocks (14,400 blocks ~ 24 hours at 6s block time)
     const ERA_BLOCKS: u32 = 14_400;
-    /// Maximum eras of staleness before fallback returns None
-    const MAX_STALE_ERAS: u32 = 10;
+    /// Maximum eras of staleness before fallback returns None.
+    /// Two eras = ~48 hours. Longer than this and the 5%-per-era discount
+    /// compounds enough to let settlements execute on materially mispriced
+    /// feeds, so after this window the oracle refuses to serve a price and
+    /// settlement on the affected rail is halted until a fresh feed arrives.
+    const MAX_STALE_ERAS: u32 = 2;
 
     impl<T: Config> twill_primitives::OracleInterface for Pallet<T> {
         fn get_price(pair: AssetPair) -> Option<u128> {

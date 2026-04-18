@@ -129,7 +129,7 @@ pub mod pallet {
         /// Once activated, any Solidity contract deployable on Ethereum deploys on Twill unchanged.
         ActivateEvm,
         /// Switch proposal voting to TWL-weighted mode early (before the automatic threshold).
-        /// Useful if the community decides it is ready before 1M TWL is mined.
+        /// Useful if the community decides it is ready before 10M TWL is mined.
         SwitchToTwlWeightedVoting,
         /// Adjust the maximum vote weight per address in TwlWeighted phase (in planck).
         /// Prevents whales from capturing governance. Default: 100,000 TWL.
@@ -237,6 +237,16 @@ pub mod pallet {
     #[pallet::storage]
     pub type ElectionVotes<T: Config> =
         StorageDoubleMap<_, Blake2_128Concat, T::AccountId, Blake2_128Concat, T::AccountId, BalanceOf<T>>;
+
+    /// Per-election snapshot of each voter's weight.
+    /// Taken on the voter's first vote in the current election and reused for
+    /// every subsequent vote they cast for other nominees in that same election.
+    /// Prevents weight inflation by transferring TWL between votes during the
+    /// voting period (approval-style multi-seat ballot).
+    /// Cleared when the election finalises.
+    #[pallet::storage]
+    pub type ElectionVoterWeight<T: Config> =
+        StorageMap<_, Blake2_128Concat, T::AccountId, BalanceOf<T>>;
 
     /// Whether an election is currently active
     #[pallet::storage]
@@ -444,10 +454,12 @@ pub mod pallet {
                 abstain: BalanceOf::<T>::zero(),
             });
 
-            // Track in active set for bounded on_initialize iteration
-            ActiveProposalIds::<T>::mutate(|ids| {
-                let _ = ids.try_push(id);
-            });
+            // Track in active set for bounded on_initialize iteration.
+            // If the active set is full, reject — otherwise the proposal
+            // would be stored but never tallied (silent hang).
+            ActiveProposalIds::<T>::try_mutate(|ids| {
+                ids.try_push(id).map_err(|_| Error::<T>::MaxProposalsReached)
+            })?;
 
             Self::deposit_event(Event::ProposalSubmitted { proposal_id: id, proposer });
             Ok(())
@@ -550,15 +562,22 @@ pub mod pallet {
             // Genesis election: 1 mined-block address = 1 vote.
             // (TWL may not be circulating yet, so balance is not a useful weight,
             //  and free addresses must not be — proof of hashpower is the gate.)
-            // All subsequent elections: 1 TWL = 1 vote (balance-weighted).
+            // All subsequent elections: 1 TWL = 1 vote, snapshotted on first
+            // vote cast in this election and reused for every later vote by
+            // the same voter. This prevents inflating weight by transferring
+            // TWL between votes during the voting window.
             let weight = if ElectionCount::<T>::get() == 0 {
                 ensure!(
                     T::MiningProvider::blocks_mined_by(&voter) >= 1,
                     Error::<T>::NoMinedBlocks,
                 );
                 BalanceOf::<T>::from(1u32)
+            } else if let Some(snapshot) = ElectionVoterWeight::<T>::get(&voter) {
+                snapshot
             } else {
-                T::Currency::total_balance(&voter)
+                let w = T::Currency::total_balance(&voter);
+                ElectionVoterWeight::<T>::insert(&voter, w);
+                w
             };
             ElectionVotes::<T>::insert(&nominee, &voter, weight);
 
@@ -697,15 +716,17 @@ pub mod pallet {
                 // Voting period ended — tally
                 let Some(tally) = Tallies::<T>::get(id) else { continue };
 
-                let total_participating = tally.aye
-                    .saturating_add(tally.nay)
-                    .saturating_add(tally.abstain);
+                // Only active (aye + nay) votes count toward quorum.
+                // Abstain is neutral — it records participation in the event
+                // log but does not let a proposal pass on low conviction
+                // (e.g. 1 Aye / 0 Nay / huge Abstain cannot clear quorum).
+                let active_votes = tally.aye.saturating_add(tally.nay);
 
-                // Quorum: 10% of total issuance must participate
+                // Quorum: 10% of total issuance must cast an active vote
                 let total_issuance = T::Currency::total_issuance();
                 let quorum = total_issuance / 10u32.into();
 
-                if total_participating < quorum {
+                if active_votes < quorum {
                     // Quorum not met — proposal expires silently. No penalty.
                     proposal.status = ProposalStatus::Expired;
                     Self::deposit_event(Event::ProposalExpired { proposal_id: id });
@@ -715,7 +736,10 @@ pub mod pallet {
                         proposal_id: id, aye: tally.aye, nay: tally.nay,
                     });
 
-                    // Board recall: take effect immediately, no enactment delay
+                    // Board recall: take effect immediately, no enactment delay.
+                    // Trigger a replacement election right away (unless one is
+                    // already running) so the board can't drift under-strength
+                    // for years if the normal renewal is far off.
                     if let ProposalKind::BoardRecall { ref member } = proposal.kind {
                         BoardMembers::<T>::mutate(|members| {
                             members.retain(|m| m != member);
@@ -723,6 +747,12 @@ pub mod pallet {
                         Self::deposit_event(Event::BoardMemberRecalled {
                             member: member.clone(),
                         });
+                        if !ElectionActive::<T>::get() {
+                            let bn = frame_system::Pallet::<T>::block_number();
+                            ElectionActive::<T>::put(true);
+                            ElectionStartBlock::<T>::put(bn);
+                            Self::deposit_event(Event::ElectionStarted { block_number: bn });
+                        }
                         proposal.status = ProposalStatus::Enacted;
                     }
 
@@ -842,6 +872,7 @@ pub mod pallet {
                 ElectionActive::<T>::put(false);
                 let _ = Nominees::<T>::clear(u32::MAX, None);
                 let _ = ElectionVotes::<T>::clear(u32::MAX, None);
+                let _ = ElectionVoterWeight::<T>::clear(u32::MAX, None);
                 return;
             }
 
@@ -868,6 +899,7 @@ pub mod pallet {
             ElectionActive::<T>::put(false);
             let _ = Nominees::<T>::clear(u32::MAX, None);
             let _ = ElectionVotes::<T>::clear(u32::MAX, None);
+            let _ = ElectionVoterWeight::<T>::clear(u32::MAX, None);
 
             Self::deposit_event(Event::BoardElected {
                 members: winners,

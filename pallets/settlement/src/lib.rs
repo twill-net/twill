@@ -548,15 +548,18 @@ pub mod pallet {
             }
 
             // ---------------------------------------------------------------
-            // Pass 1.1: Enforce mandatory TWL leg
-            // Every settlement must route through at least one TwillInternal
-            // leg. This guarantees fee collection and price oracle signal on
-            // every swap. Direct non-TWL swaps (e.g. BTC↔Carbon) require
-            // a TWL leg on both sides as the pricing bridge.
+            // Pass 1.1: Enforce mandatory TWL debit leg
+            // Every settlement must have at least one TwillInternal *debit*
+            // leg. The fee is calculated on the TWL-debit volume, so without
+            // one the fee collapses to zero and stakers/treasury see no
+            // revenue on that flow. A TWL credit-only leg (payout) is not
+            // sufficient; the chain must be the one moving value inward.
             // ---------------------------------------------------------------
 
             ensure!(
-                legs_info.iter().any(|l| l.rail == RailKind::TwillInternal),
+                legs_info.iter().any(|l|
+                    l.rail == RailKind::TwillInternal && l.side == LegSide::Debit
+                ),
                 Error::<T>::TwlLegRequired
             );
 
@@ -810,15 +813,14 @@ pub mod pallet {
                 }
             });
 
-            // Update network metrics
+            // Update network metrics.
+            // If the BalanceOf<T> -> u128 conversion ever fails, skip the
+            // volume update rather than pinning the metric at u128::MAX
+            // (which would mask real volume forever).
             TotalSettlements::<T>::mutate(|n| *n = n.saturating_add(1));
-            TotalVolumeSettled::<T>::mutate(|v| {
-                *v = v.saturating_add(
-                    total_volume
-                        .try_into()
-                        .unwrap_or(u128::MAX),
-                )
-            });
+            if let Ok(delta) = TryInto::<u128>::try_into(total_volume) {
+                TotalVolumeSettled::<T>::mutate(|v| *v = v.saturating_add(delta));
+            }
             ValidatorSettlements::<T>::mutate(&settler, |n| *n = n.saturating_add(1));
 
             // ---------------------------------------------------------------

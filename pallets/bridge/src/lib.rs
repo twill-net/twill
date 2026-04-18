@@ -103,8 +103,15 @@ pub mod pallet {
     #[pallet::genesis_build]
     impl<T: Config> BuildGenesisConfig for GenesisConfig<T> {
         fn build(&self) {
+            // Genesis config is author-supplied, so exceeding MaxRelayers
+            // is a chain-spec error. Fail fast with a clear message rather
+            // than letting the chain come up with a silently truncated or
+            // empty relayer set.
             let bounded: BoundedVec<T::AccountId, T::MaxRelayers> =
-                self.relayers.clone().try_into().expect("too many genesis relayers");
+                self.relayers.clone().try_into().expect(
+                    "bridge genesis: relayers Vec exceeds MaxRelayers bound \
+                     — shorten the genesis relayer list or raise MaxRelayers",
+                );
             Relayers::<T>::put(bounded);
             ConfirmationThreshold::<T>::put(if self.threshold == 0 { 2 } else { self.threshold });
         }
