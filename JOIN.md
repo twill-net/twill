@@ -235,7 +235,7 @@ The GPU helper compiles a WGSL compute shader at launch. Different GPUs/drivers 
 - `MSL: FeatureNotImplemented("atomic CompareExchange")`
 - `dispatch group size dimension must be less or equal to 65535`
 
-make sure you are building from main (`v0.2.1` or later) — earlier tags had shader issues that showed up only on some GPU backends. `git pull && cargo build --release -p twill-miner` and retry.
+make sure you are building from main (`v0.2.4` or later) — earlier tags had shader issues that showed up only on some GPU backends. `git pull && cargo build --release -p twill-miner` and retry.
 
 **CPU fallback for any GPU issue:**
 

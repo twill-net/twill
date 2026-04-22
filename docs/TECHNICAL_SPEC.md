@@ -1,10 +1,10 @@
 # Twill Network (TWL) Technical Specification
 
-**Version:** 0.2.0-draft
-**Status:** Pre-release Draft
+**Version:** 0.2.4
+**Status:** Live
 **Authors:** Twill Project
 **License:** Apache-2.0
-**Date:** 2026-04-09
+**Date:** 2026-04-22
 
 ---
 

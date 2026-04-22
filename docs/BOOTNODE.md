@@ -135,14 +135,14 @@ A healthy bootnode log shows:
 
 ```
 📋 Chain specification: Twill Network
-🔨 Initializing Genesis block/state (... header-hash: 0xeee3…6b80)
+🔨 Initializing Genesis block/state (... header-hash: 0x5c94…b001)
 🏷  Local node identity is: 12D3KooW...
 🔍 Discovered new external address for our node: /ip4/.../tcp/30333/p2p/...
 ```
 
-The genesis header-hash **must** be `0xeee3…6b80`. If yours differs, you built
+The genesis header-hash **must** be `0x5c94…b001`. If yours differs, you built
 from an old fork or applied a wrong chain spec — rebuild from a clean clone of
-`main` at tag `v0.2.1` or later.
+`main` at tag `v0.2.4` or later.
 
 ---
 
