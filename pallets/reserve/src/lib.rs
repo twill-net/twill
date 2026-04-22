@@ -533,7 +533,18 @@ pub mod pallet {
             if let Some(p) = pair {
                 if let Some(price) = T::Oracle::get_price(p) {
                     if price > 0 {
-                        return original_amount.saturating_mul(price) / TWILL;
+                        // `original_amount * price` can exceed u128 for large reserves
+                        // at high oracle prices (both factors can approach 2^66 in
+                        // planck units). Promote to U256 for the multiply, then divide
+                        // back to u128. Same pattern as the retarget and fee share.
+                        let wide = sp_core::U256::from(original_amount)
+                            .saturating_mul(sp_core::U256::from(price))
+                            / sp_core::U256::from(TWILL);
+                        return if wide > sp_core::U256::from(u128::MAX) {
+                            u128::MAX
+                        } else {
+                            wide.low_u128()
+                        };
                     }
                 }
                 // Oracle stale or price zero — return 0, not raw amount.

@@ -121,7 +121,7 @@ pub const VERSION: sp_version::RuntimeVersion = sp_version::RuntimeVersion {
     spec_name: create_runtime_str!("twill"),
     impl_name: create_runtime_str!("twill-node"),
     authoring_version: 1,
-    spec_version: 104,
+    spec_version: 105,
     impl_version: 1,
     apis: RUNTIME_API_VERSIONS,
     transaction_version: 1,

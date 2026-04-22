@@ -693,12 +693,26 @@ pub mod pallet {
                     T::Currency::unreserve(&debit.participant, debit.amount);
                 }
 
-                // Calculate fee share for this currency (proportional to its debit volume)
+                // Calculate fee share for this currency (proportional to its debit volume).
+                // Both `fee` and `debit_sum` are u128 balances; their product can exceed
+                // u128::MAX at sizes near TOTAL_SUPPLY. Promote to U256 for the multiply
+                // so the proportion is exact, then divide back down before re-entering
+                // the balance type. Same class of fix as `compute_retarget`.
                 let currency_fee = if twl_debit_total.is_zero() {
                     BalanceOf::<T>::zero()
                 } else {
-                    // fee * (currency_debit / total_debit)
-                    fee.saturating_mul(debit_sum) / twl_debit_total
+                    let fee_u128: u128 = fee.try_into().unwrap_or(0u128);
+                    let debit_sum_u128: u128 = debit_sum.try_into().unwrap_or(0u128);
+                    let total_u128: u128 = twl_debit_total.try_into().unwrap_or(1u128).max(1);
+                    let wide = sp_core::U256::from(fee_u128)
+                        .saturating_mul(sp_core::U256::from(debit_sum_u128))
+                        / sp_core::U256::from(total_u128);
+                    let share_u128: u128 = if wide > sp_core::U256::from(u128::MAX) {
+                        u128::MAX
+                    } else {
+                        wide.low_u128()
+                    };
+                    share_u128.try_into().unwrap_or(BalanceOf::<T>::zero())
                 };
 
                 // Deduct fee from the first debit participant of this currency

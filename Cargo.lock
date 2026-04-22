@@ -5463,7 +5463,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-bridge"
-version = "0.1.0"
+version = "0.2.4"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -5476,7 +5476,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-carbon"
-version = "0.1.0"
+version = "0.2.4"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -5492,7 +5492,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-governance"
-version = "0.1.0"
+version = "0.2.4"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -5506,7 +5506,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-mining"
-version = "0.1.0"
+version = "0.2.4"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -5524,7 +5524,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-oracle"
-version = "0.1.0"
+version = "0.2.4"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -5539,7 +5539,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-reserve"
-version = "0.1.0"
+version = "0.2.4"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -5556,7 +5556,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-settlement"
-version = "0.1.0"
+version = "0.2.4"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -5637,7 +5637,7 @@ dependencies = [
 
 [[package]]
 name = "pallet-twl-token"
-version = "0.1.0"
+version = "0.2.4"
 dependencies = [
  "frame-support",
  "frame-system",
@@ -10085,7 +10085,7 @@ dependencies = [
 
 [[package]]
 name = "twill-miner"
-version = "0.1.0"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -10100,7 +10100,7 @@ dependencies = [
 
 [[package]]
 name = "twill-node"
-version = "0.1.0"
+version = "0.2.4"
 dependencies = [
  "clap",
  "futures",
@@ -10137,7 +10137,7 @@ dependencies = [
 
 [[package]]
 name = "twill-primitives"
-version = "0.1.0"
+version = "0.2.4"
 dependencies = [
  "hex",
  "parity-scale-codec",
@@ -10151,7 +10151,7 @@ dependencies = [
 
 [[package]]
 name = "twill-runtime"
-version = "0.1.0"
+version = "0.2.4"
 dependencies = [
  "frame-executive",
  "frame-support",

@@ -884,4 +884,41 @@ mod tests {
             assert_eq!(out[i], 0xFF);
         }
     }
+
+    /// Regression test for the block-4033 mainnet stall.
+    ///
+    /// Observed on-chain inputs when the pre-U256 binary corrupted the
+    /// difficulty:
+    ///   block 2016 timestamp: 1,776,580,797,923
+    ///   block 4032 timestamp: 1,776,602,538,454
+    ///   actual_ms = 21,740,531 (blocks were slightly slower than target)
+    ///   expected_ms = 2016 * 6000 = 12,096,000
+    ///
+    /// The buggy pre-fix u128 math overflowed and saturated, yielding
+    /// new_target = u128::MAX / 12_096_000 = 0x0163_12c7_5c3f_26ef_0520_1b64_b2e1
+    /// which made the chain un-mineable.
+    ///
+    /// With the U256 fix, actual > expected means clamped = actual (in range),
+    /// new = old * 1.797... which is greater than INITIAL, so the `.min(initial)`
+    /// clamp holds difficulty at the genesis ceiling — i.e. no change, chain
+    /// continues.
+    #[test]
+    fn retarget_regression_block_4033_stall_is_fixed() {
+        let observed_actual_ms: u64 = 21_740_531;
+        let observed_expected_ms: u64 = 12_096_000;
+        let out = compute_retarget(INITIAL_DIFFICULTY, observed_actual_ms, observed_expected_ms);
+        assert_eq!(
+            upper_u128(out),
+            initial_u128(),
+            "block-4033 regression: slow blocks must clamp to genesis ceiling, \
+             not overflow to u128::MAX / expected_ms"
+        );
+        // And the exact corrupted value must NOT be produced.
+        let corrupted_u128: u128 = u128::MAX / 12_096_000;
+        assert_ne!(
+            upper_u128(out),
+            corrupted_u128,
+            "must not produce the pre-fix overflow value"
+        );
+    }
 }
